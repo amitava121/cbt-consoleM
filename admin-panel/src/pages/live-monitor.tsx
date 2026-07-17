@@ -1,0 +1,395 @@
+import {
+    Activity,
+    AlertTriangle,
+    Clock,
+    Pause,
+    Play,
+    RefreshCw,
+    Terminal,
+    Timer,
+    Wifi,
+} from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import {
+    Card,
+    CardContent,
+    CardHeader,
+    CardTitle,
+} from "../components/ui/card";
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from "../components/ui/table";
+import { examBatchService } from "../services/exam-batches";
+import { sessionService } from "../services/sessions";
+import type { ActiveAttempt, ExamBatchListItem } from "../types/index";
+
+function formatTime(secs: number): string {
+  if (secs <= 0) return "00:00:00";
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+function statusColor(status: string): string {
+  switch (status) {
+    case "in_progress":
+      return "bg-green-500/10 text-green-600 border-green-500/20";
+    case "paused":
+      return "bg-yellow-500/10 text-yellow-600 border-yellow-500/20";
+    case "not_started":
+      return "bg-blue-500/10 text-blue-600 border-blue-500/20";
+    case "submitted":
+    case "auto_submitted":
+      return "bg-gray-500/10 text-gray-600 border-gray-500/20";
+    case "terminated":
+      return "bg-red-500/10 text-red-600 border-red-500/20";
+    default:
+      return "bg-gray-500/10 text-gray-600 border-gray-500/20";
+  }
+}
+
+export default function LiveMonitorPage() {
+  const [examBatches, setExamBatches] = useState<ExamBatchListItem[]>([]);
+  const [selectedBatchId, setSelectedBatchId] = useState<string>("");
+  const [attempts, setAttempts] = useState<ActiveAttempt[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [lastRefresh, setLastRefresh] = useState<number>(0);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Load exam batches on mount
+  useEffect(() => {
+    const loadBatches = async () => {
+      try {
+        const res = await examBatchService.list({ pageSize: 100 });
+        setExamBatches(res.data);
+        if (res.data.length > 0 && !selectedBatchId) {
+          const activeBatch = res.data.find(
+            (b) => b.status === "active" || b.status === "published",
+          );
+          setSelectedBatchId(activeBatch?.id ?? res.data[0].id);
+        }
+      } catch {
+        toast.error("Failed to load exam batches");
+      }
+    };
+    loadBatches();
+  }, []);
+
+  const fetchActiveSessions = useCallback(async () => {
+    if (!selectedBatchId) return;
+    setLoading(true);
+    try {
+      const res = await sessionService.getActiveSessions(selectedBatchId);
+      setAttempts(res.attempts);
+      setLastRefresh(Date.now());
+    } catch {
+      toast.error("Failed to fetch active sessions");
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedBatchId]);
+
+  // Auto-refresh every 5 seconds
+  useEffect(() => {
+    if (autoRefresh && selectedBatchId) {
+      fetchActiveSessions();
+      intervalRef.current = setInterval(fetchActiveSessions, 5000);
+      return () => {
+        if (intervalRef.current) clearInterval(intervalRef.current);
+      };
+    }
+  }, [autoRefresh, selectedBatchId, fetchActiveSessions]);
+
+  const handlePause = async (attemptId: string) => {
+    try {
+      await sessionService.pauseAttempt(attemptId, "Admin pause from monitor");
+      toast.success("Attempt paused");
+      fetchActiveSessions();
+    } catch {
+      toast.error("Failed to pause attempt");
+    }
+  };
+
+  const handleResume = async (attemptId: string) => {
+    try {
+      await sessionService.resumeAttempt(attemptId);
+      toast.success("Attempt resumed");
+      fetchActiveSessions();
+    } catch {
+      toast.error("Failed to resume attempt");
+    }
+  };
+
+  const handleTerminate = async (attemptId: string) => {
+    if (!confirm("Are you sure you want to terminate this attempt?")) return;
+    try {
+      await sessionService.terminateAttempt(
+        attemptId,
+        "Admin termination from monitor",
+      );
+      toast.success("Attempt terminated");
+      fetchActiveSessions();
+    } catch {
+      toast.error("Failed to terminate attempt");
+    }
+  };
+
+  const inProgressCount = attempts.filter(
+    (a) => a.status === "in_progress",
+  ).length;
+  const pausedCount = attempts.filter((a) => a.status === "paused").length;
+  const notStartedCount = attempts.filter(
+    (a) => a.status === "not_started",
+  ).length;
+  const reconnectedCount = attempts.filter((a) => a.isReconnected).length;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Live Monitor</h1>
+          <p className="text-sm text-muted-foreground">
+            Real-time exam session monitoring
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant={autoRefresh ? "default" : "outline"}
+            size="sm"
+            onClick={() => setAutoRefresh(!autoRefresh)}
+          >
+            <RefreshCw
+              className={`mr-2 h-4 w-4 ${autoRefresh ? "animate-spin" : ""}`}
+            />
+            {autoRefresh ? "Auto (5s)" : "Manual"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={fetchActiveSessions}
+            disabled={loading}
+          >
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Refresh
+          </Button>
+        </div>
+      </div>
+
+      {/* Batch selector */}
+      <div className="flex items-center gap-3">
+        <label className="text-sm font-medium">Exam Batch:</label>
+        <select
+          className="rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+          value={selectedBatchId}
+          onChange={(e) => setSelectedBatchId(e.target.value)}
+        >
+          <option value="">Select a batch...</option>
+          {examBatches.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name} ({b.status})
+            </option>
+          ))}
+        </select>
+        {lastRefresh > 0 && (
+          <span className="text-xs text-muted-foreground">
+            Last updated: {new Date(lastRefresh).toLocaleTimeString()}
+          </span>
+        )}
+      </div>
+
+      {/* Stats cards */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              In Progress
+            </CardTitle>
+            <Activity className="h-4 w-4 text-green-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">
+              {inProgressCount}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Paused
+            </CardTitle>
+            <Pause className="h-4 w-4 text-yellow-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-yellow-600">
+              {pausedCount}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Not Started
+            </CardTitle>
+            <Clock className="h-4 w-4 text-blue-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600">
+              {notStartedCount}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Reconnected
+            </CardTitle>
+            <Wifi className="h-4 w-4 text-purple-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-purple-600">
+              {reconnectedCount}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Active sessions table */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Activity className="h-5 w-5" />
+            Active Sessions ({attempts.length})
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {!selectedBatchId ? (
+            <div className="flex items-center justify-center py-12 text-muted-foreground">
+              Select an exam batch to view active sessions
+            </div>
+          ) : attempts.length === 0 && !loading ? (
+            <div className="flex items-center justify-center py-12 text-muted-foreground">
+              No active sessions for this exam batch
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Attempt ID</TableHead>
+                  <TableHead>Candidate</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Remaining Time</TableHead>
+                  <TableHead>Connection</TableHead>
+                  <TableHead>Reconnects</TableHead>
+                  <TableHead>Started At</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {attempts.map((attempt) => (
+                  <TableRow key={attempt.id}>
+                    <TableCell className="font-mono text-xs">
+                      {attempt.id.slice(0, 8)}...
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">
+                      {attempt.candidateId.slice(0, 8)}...
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant="outline"
+                        className={statusColor(attempt.status)}
+                      >
+                        {attempt.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <span className="flex items-center gap-1 font-mono text-sm">
+                        <Timer className="h-3 w-3 text-muted-foreground" />
+                        {formatTime(attempt.remainingTimeSecs)}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      {attempt.isReconnected ? (
+                        <span className="flex items-center gap-1 text-xs text-purple-600">
+                          <Wifi className="h-3 w-3" />
+                          Reconnected
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-xs text-green-600">
+                          <Wifi className="h-3 w-3" />
+                          Connected
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {attempt.reconnectedCount > 0 ? (
+                        <span className="flex items-center gap-1 text-xs text-yellow-600">
+                          <AlertTriangle className="h-3 w-3" />
+                          {attempt.reconnectedCount}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">0</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {attempt.startedAt
+                        ? new Date(attempt.startedAt).toLocaleTimeString()
+                        : "—"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        {attempt.status === "in_progress" && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => handlePause(attempt.id)}
+                            title="Pause"
+                          >
+                            <Pause className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {attempt.status === "paused" && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => handleResume(attempt.id)}
+                            title="Resume"
+                          >
+                            <Play className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {(attempt.status === "in_progress" ||
+                          attempt.status === "paused") && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive"
+                            onClick={() => handleTerminate(attempt.id)}
+                            title="Terminate"
+                          >
+                            <Terminal className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

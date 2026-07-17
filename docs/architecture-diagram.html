@@ -1,0 +1,1130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CBT Platform — Architecture Diagram</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        background: #0a0e1a;
+        font-family:
+          "Segoe UI",
+          system-ui,
+          -apple-system,
+          sans-serif;
+        color: #e2e8f0;
+        overflow-x: auto;
+        padding: 20px;
+      }
+      h1 {
+        text-align: center;
+        font-size: 28px;
+        background: linear-gradient(135deg, #60a5fa, #a78bfa, #f472b6);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        margin-bottom: 4px;
+      }
+      .subtitle {
+        text-align: center;
+        color: #64748b;
+        font-size: 13px;
+        margin-bottom: 30px;
+      }
+      .diagram {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 20px;
+        min-width: 1200px;
+        margin: 0 auto;
+      }
+
+      /* TRUST BOUNDARY */
+      .boundary {
+        border: 2px dashed;
+        border-radius: 20px;
+        padding: 30px;
+        position: relative;
+        width: 100%;
+      }
+      .boundary-label {
+        position: absolute;
+        top: -12px;
+        left: 30px;
+        background: #0a0e1a;
+        padding: 0 12px;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+      }
+      .boundary-lan {
+        border-color: #3b82f6;
+      }
+      .boundary-lan .boundary-label {
+        color: #3b82f6;
+      }
+      .boundary-server {
+        border-color: #8b5cf6;
+      }
+      .boundary-server .boundary-label {
+        color: #8b5cf6;
+      }
+      .boundary-client {
+        border-color: #ec4899;
+      }
+      .boundary-client .boundary-label {
+        color: #ec4899;
+      }
+      .boundary-admin {
+        border-color: #10b981;
+      }
+      .boundary-admin .boundary-label {
+        color: #10b981;
+      }
+
+      /* ROWS */
+      .row {
+        display: flex;
+        gap: 24px;
+        justify-content: center;
+        align-items: stretch;
+        flex-wrap: nowrap;
+        width: 100%;
+      }
+
+      /* CARDS */
+      .card {
+        border-radius: 16px;
+        padding: 20px;
+        position: relative;
+        transition:
+          transform 0.2s,
+          box-shadow 0.2s;
+        min-width: 260px;
+      }
+      .card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+      }
+      .card-title {
+        font-size: 16px;
+        font-weight: 700;
+        margin-bottom: 4px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .card-icon {
+        font-size: 22px;
+      }
+      .card-subtitle {
+        font-size: 11px;
+        color: #94a3b8;
+        margin-bottom: 14px;
+      }
+      .card-body {
+        font-size: 12px;
+        line-height: 1.7;
+      }
+      .tag {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 600;
+        margin: 2px;
+      }
+
+      /* SERVER CARD */
+      .card-server {
+        background: linear-gradient(135deg, #1e1b4b, #312e81);
+        border: 1px solid #6366f1;
+        flex: 1;
+        max-width: 500px;
+      }
+      .card-server .card-title {
+        color: #a5b4fc;
+      }
+      .card-server .tag {
+        background: #4338ca;
+        color: #c7d2fe;
+      }
+
+      /* SUB-CARDS (Server internals) */
+      .internals {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .internal {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(99, 102, 241, 0.3);
+        border-radius: 10px;
+        padding: 10px;
+        font-size: 11px;
+      }
+      .internal-title {
+        font-weight: 700;
+        font-size: 12px;
+        margin-bottom: 4px;
+      }
+      .internal i {
+        color: #818cf8;
+      }
+
+      /* DB CARD */
+      .card-db {
+        background: linear-gradient(135deg, #064e3b, #065f46);
+        border: 1px solid #10b981;
+        min-width: 280px;
+        max-width: 320px;
+      }
+      .card-db .card-title {
+        color: #6ee7b7;
+      }
+      .card-db .tag {
+        background: #065f46;
+        color: #a7f3d0;
+      }
+
+      /* CLIENT CARD */
+      .card-client {
+        background: linear-gradient(135deg, #831843, #9d174d);
+        border: 1px solid #ec4899;
+        min-width: 280px;
+        max-width: 340px;
+      }
+      .card-client .card-title {
+        color: #f9a8d4;
+      }
+      .card-client .tag {
+        background: #9d174d;
+        color: #fbcfe8;
+      }
+
+      /* ADMIN CARD */
+      .card-admin {
+        background: linear-gradient(135deg, #064e3b, #047857);
+        border: 1px solid #34d399;
+        min-width: 280px;
+        max-width: 340px;
+      }
+      .card-admin .card-title {
+        color: #6ee7b7;
+      }
+      .card-admin .tag {
+        background: #047857;
+        color: #a7f3d0;
+      }
+
+      /* NGINX CARD */
+      .card-nginx {
+        background: linear-gradient(135deg, #78350f, #92400e);
+        border: 1px solid #f59e0b;
+        min-width: 200px;
+        max-width: 240px;
+        text-align: center;
+      }
+      .card-nginx .card-title {
+        color: #fcd34d;
+        justify-content: center;
+      }
+      .card-nginx .tag {
+        background: #92400e;
+        color: #fde68a;
+      }
+
+      /* ARROWS */
+      .arrow-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 40px;
+        position: relative;
+      }
+      .arrow {
+        font-size: 24px;
+        color: #475569;
+      }
+      .arrow-label {
+        position: absolute;
+        font-size: 10px;
+        color: #64748b;
+        background: #0a0e1a;
+        padding: 2px 8px;
+        border-radius: 4px;
+        white-space: nowrap;
+      }
+
+      /* FLOW LINES */
+      .flow-line {
+        height: 2px;
+        background: linear-gradient(90deg, transparent, #475569, transparent);
+        margin: 0 auto;
+        width: 60%;
+        position: relative;
+      }
+      .flow-label {
+        position: absolute;
+        top: -20px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 11px;
+        color: #64748b;
+        white-space: nowrap;
+      }
+
+      /* LEGEND */
+      .legend {
+        display: flex;
+        gap: 20px;
+        justify-content: center;
+        flex-wrap: wrap;
+        margin-top: 20px;
+        padding: 16px;
+        background: #111827;
+        border-radius: 12px;
+        border: 1px solid #1e293b;
+      }
+      .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: #94a3b8;
+      }
+      .legend-dot {
+        width: 14px;
+        height: 14px;
+        border-radius: 4px;
+      }
+
+      /* TECH STACK BAR */
+      .stack-bar {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 8px;
+      }
+      .stack-item {
+        padding: 3px 10px;
+        border-radius: 6px;
+        font-size: 10px;
+        font-weight: 600;
+      }
+
+      /* ANIMATIONS */
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+      .pulsing {
+        animation: pulse 2s infinite;
+      }
+
+      /* RESPONSIVE */
+      @media (max-width: 1300px) {
+        .diagram {
+          min-width: 100%;
+        }
+        .row {
+          flex-wrap: wrap;
+        }
+        .card {
+          min-width: 240px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Competitive CBT Platform — System Architecture</h1>
+    <p class="subtitle">
+      LAN-Based · Offline-First · WebSocket Real-Time · Single-Server ·
+      Architecture FROZEN v3.0
+    </p>
+
+    <div class="diagram">
+      <!-- ===== TRUST BOUNDARY: LAN ===== -->
+      <div class="boundary boundary-lan">
+        <span class="boundary-label"
+          >🔒 LAN Trust Boundary (Exam Center — No Internet)</span
+        >
+
+        <!-- ROW 1: Clients -->
+        <div class="row" style="margin-bottom: 20px">
+          <!-- EXAMLAUNCHER -->
+          <div
+            class="card"
+            style="background:linear-gradient(135deg,#1e1b4b,#312e81);border:1px solid:#6366f1;min-width:200px;max-width:240px;"
+          >
+            <div class="card-title" style="color: #a5b4fc">
+              <span class="card-icon">🛡️</span>
+              ExamLauncher
+            </div>
+            <div class="card-subtitle">
+              Watchdog Process · C# .NET 8 Native AOT
+            </div>
+            <div class="card-body">
+              <div style="font-size: 11px; color: #a5b4fc">
+                <b>Starts:</b> WPF client (kiosk)<br />
+                <b>Monitors:</b> Process health (500ms poll)<br />
+                <b>Restarts:</b> On crash (backoff, max 3)<br />
+                <b>Enforces:</b> Single instance (mutex)<br />
+                <b>Collects:</b> WER crash logs
+              </div>
+              <div class="stack-bar" style="margin-top: 8px">
+                <span
+                  class="stack-item"
+                  style="background: #3730a3; color: #c7d2fe"
+                  >Native AOT</span
+                >
+                <span
+                  class="stack-item"
+                  style="background: #3730a3; color: #c7d2fe"
+                  >~10MB</span
+                >
+              </div>
+            </div>
+          </div>
+
+          <!-- EXAM CLIENT -->
+          <div class="card card-client">
+            <div class="card-title">
+              <span class="card-icon">🖥️</span>
+              Exam Client (Candidate Machine)
+            </div>
+            <div class="card-subtitle">
+              Kiosk-mode desktop application · 500 concurrent
+            </div>
+            <div class="card-body">
+              <div style="margin-bottom: 8px">
+                <strong style="color: #f9a8d4">Framework:</strong> C# WPF (.NET
+                8)<br />
+                <strong style="color: #f9a8d4">MVVM:</strong>
+                CommunityToolkit.Mvvm<br />
+                <strong style="color: #f9a8d4">Styling:</strong> XAML +
+                ResourceDictionary
+              </div>
+              <div class="stack-bar">
+                <span
+                  class="stack-item"
+                  style="background: #831843; color: #fbcfe8"
+                  >CommunityToolkit.Mvvm</span
+                >
+                <span
+                  class="stack-item"
+                  style="background: #831843; color: #fbcfe8"
+                  >Microsoft.Data.Sqlite</span
+                >
+                <span
+                  class="stack-item"
+                  style="background: #831843; color: #fbcfe8"
+                  >SQLCipher (AES-256)</span
+                >
+                <span
+                  class="stack-item"
+                  style="background: #831843; color: #fbcfe8"
+                  >ClientWebSocket</span
+                >
+                <span
+                  class="stack-item"
+                  style="background: #831843; color: #fbcfe8"
+                  >Win32 P/Invoke</span
+                >
+              </div>
+              <div style="margin-top: 10px; font-size: 11px; color: #f9a8d4">
+                <b>Lockdown:</b> WH_KEYBOARD_LL · SetWindowPos · VM detection ·
+                Cert pinning<br />
+                <b>Offline:</b> Local encrypted SQLite · Auto-save · Crash
+                recovery · Delta sync<br />
+                <b>Security:</b> Signed manifest verification · Signed policy
+                (Ed25519) · Embedded public key<br />
+                <b>State:</b> CommunityToolkit.Mvvm (ObservableProperty +
+                IMessenger) · No IPC · Single process
+              </div>
+            </div>
+          </div>
+
+          <!-- ADMIN DASHBOARD -->
+          <div class="card card-admin">
+            <div class="card-title">
+              <span class="card-icon">📊</span>
+              Admin Dashboard (Browser)
+            </div>
+            <div class="card-subtitle">Web UI · Admin & Proctor machines</div>
+            <div class="card-body">
+              <div style="margin-bottom: 8px">
+                <strong style="color: #6ee7b7">Framework:</strong> React 19 +
+                React Compiler<br />
+                <strong style="color: #6ee7b7">Build:</strong> Vite 6
+                (Rolldown)<br />
+                <strong style="color: #6ee7b7">Styling:</strong> TailwindCSS 4
+                (Oxide)<br />
+                <strong style="color: #6ee7b7">Components:</strong> shadcn/ui
+                (Radix UI)
+              </div>
+              <div class="stack-bar">
+                <span
+                  class="stack-item"
+                  style="background: #047857; color: #a7f3d0"
+                  >Zustand v5</span
+                >
+                <span
+                  class="stack-item"
+                  style="background: #047857; color: #a7f3d0"
+                  >TanStack Query v5</span
+                >
+                <span
+                  class="stack-item"
+                  style="background: #047857; color: #a7f3d0"
+                  >Recharts</span
+                >
+              </div>
+              <div style="margin-top: 10px; font-size: 11px; color: #6ee7b7">
+                <b>Features:</b> Question bank · Exam wizard · Live monitoring ·
+                Proctoring · Results & analytics<br />
+                <b>Access:</b> JWT auth · RBAC (super_admin, exam_admin,
+                proctor, content_creator)
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ARROWS: Clients → Nginx -->
+        <div class="arrow-container">
+          <div style="display: flex; gap: 60px; align-items: center">
+            <div style="text-align: center">
+              <div style="font-size: 11px; color: #ec4899; margin-bottom: 2px">
+                HTTPS / WSS
+              </div>
+              <div class="arrow" style="color: #ec4899">↓</div>
+            </div>
+            <div style="text-align: center">
+              <div style="font-size: 11px; color: #10b981; margin-bottom: 2px">
+                HTTPS
+              </div>
+              <div class="arrow" style="color: #10b981">↓</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ROW 2: NGINX -->
+        <div class="row" style="margin-bottom: 20px">
+          <div class="card card-nginx">
+            <div class="card-title">
+              <span class="card-icon">⚙️</span>
+              Nginx Reverse Proxy
+            </div>
+            <div class="card-body" style="margin-top: 8px">
+              <div style="font-size: 11px; color: #fcd34d">
+                TLS 1.2+ termination<br />
+                Static file serving<br />
+                WebSocket upgrade · Sticky sessions<br />
+                Rate limiting · Security headers<br />
+                Cert pinning anchor
+              </div>
+              <div class="stack-bar" style="justify-content: center">
+                <span
+                  class="stack-item"
+                  style="background: #78350f; color: #fde68a"
+                  >Nginx 1.27+</span
+                >
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ARROW: Nginx → Server -->
+        <div class="arrow-container">
+          <div style="text-align: center">
+            <div style="font-size: 11px; color: #f59e0b; margin-bottom: 2px">
+              Reverse Proxy (HTTP → Fastify)
+            </div>
+            <div class="arrow" style="color: #f59e0b">↓</div>
+          </div>
+        </div>
+
+        <!-- ROW 3: SERVER + DB -->
+        <div class="row">
+          <!-- EXAM SERVER -->
+          <div
+            class="boundary boundary-server"
+            style="
+              border-style: solid;
+              border-width: 1px;
+              padding: 20px;
+              width: auto;
+              flex: 1;
+              max-width: 600px;
+            "
+          >
+            <span class="boundary-label">⚡ Exam Server (Node.js 24 LTS)</span>
+
+            <div class="card card-server" style="max-width: none; width: 100%">
+              <div class="card-title">
+                <span class="card-icon">🚀</span>
+                Fastify 5.x Application Server
+              </div>
+              <div class="card-subtitle">
+                PM2 Cluster Mode · Sticky Sessions · Modular Monolith · Pino
+                logging
+              </div>
+
+              <div class="internals">
+                <div class="internal">
+                  <div class="internal-title">🔐 Auth Service</div>
+                  <i>JWT issuance/verify · RBAC</i><br />
+                  <i>Argon2id (@node-rs/argon2)</i><br />
+                  <span class="tag">JWT</span>
+                  <span class="tag">Argon2id</span>
+                </div>
+                <div class="internal">
+                  <div class="internal-title">📋 Exam Session Manager</div>
+                  <i>State machine · WebSocket rooms</i><br />
+                  <i>Crash recovery · Device validation</i><br />
+                  <span class="tag">ws</span>
+                  <span class="tag">State Machine</span>
+                </div>
+                <div class="internal">
+                  <div class="internal-title">📝 Question Bank Service</div>
+                  <i>CRUD · AES-256 encryption</i><br />
+                  <i>Randomization · Import/export</i><br />
+                  <span class="tag">Drizzle</span>
+                  <span class="tag">AES-256</span>
+                </div>
+                <div class="internal">
+                  <div class="internal-title">✅ Grading Engine</div>
+                  <i>Auto-grading · Score calculation</i><br />
+                  <i>Percentile · Rank lists</i><br />
+                  <span class="tag">Worker Threads</span>
+                </div>
+                <div class="internal">
+                  <div class="internal-title">📊 Analytics Engine</div>
+                  <i>Item analysis · IRT</i><br />
+                  <i>Difficulty/discrimination index</i><br />
+                  <span class="tag">Drizzle Aggregates</span>
+                </div>
+                <div class="internal">
+                  <div class="internal-title">📜 Audit Service</div>
+                  <i>Immutable logging</i><br />
+                  <i>Tamper-evident hash chain</i><br />
+                  <span class="tag">Pino + Append-only</span>
+                </div>
+                <div class="internal">
+                  <div class="internal-title">📡 Monitoring Service</div>
+                  <i>UNLOGGED table (no WAL)</i><br />
+                  <i>Heartbeat snapshots · Alerts</i><br />
+                  <span class="tag">UNLOGGED</span>
+                  <span class="tag">No Redis</span>
+                </div>
+              </div>
+
+              <div
+                style="
+                  margin-top: 14px;
+                  padding-top: 12px;
+                  border-top: 1px solid rgba(99, 102, 241, 0.3);
+                "
+              >
+                <div
+                  style="
+                    font-size: 12px;
+                    font-weight: 700;
+                    color: #a5b4fc;
+                    margin-bottom: 6px;
+                  "
+                >
+                  Shared Infrastructure
+                </div>
+                <div class="stack-bar">
+                  <span
+                    class="stack-item"
+                    style="background: #3730a3; color: #c7d2fe"
+                    >Drizzle ORM</span
+                  >
+                  <span
+                    class="stack-item"
+                    style="background: #3730a3; color: #c7d2fe"
+                    >pg-pool (20 conn)</span
+                  >
+                  <span
+                    class="stack-item"
+                    style="background: #3730a3; color: #c7d2fe"
+                    >lru-cache (L1)</span
+                  >
+                  <span
+                    class="stack-item"
+                    style="background: #3730a3; color: #c7d2fe"
+                    >Pino Logger</span
+                  >
+                  <span
+                    class="stack-item"
+                    style="background: #3730a3; color: #c7d2fe"
+                    >JSON Schema</span
+                  >
+                  <span
+                    class="stack-item"
+                    style="background: #3730a3; color: #c7d2fe"
+                    >ws (WebSocket)</span
+                  >
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- DATABASE -->
+          <div class="card card-db">
+            <div class="card-title">
+              <span class="card-icon">🗄️</span>
+              PostgreSQL 18
+            </div>
+            <div class="card-subtitle">
+              Primary Database · ACID · 16GB RAM server
+            </div>
+            <div class="card-body">
+              <div style="margin-bottom: 8px">
+                <strong style="color: #6ee7b7">PK Strategy:</strong> UUIDv7
+                (built-in)<br />
+                <strong style="color: #6ee7b7">I/O:</strong> Async I/O
+                (worker)<br />
+                <strong style="color: #6ee7b7">Index:</strong> Skip Scan · SIMD
+                JSON<br />
+                <strong style="color: #6ee7b7">Pool:</strong> 20 connections
+                (pg-pool)
+              </div>
+              <div style="margin-top: 8px; font-size: 11px; color: #6ee7b7">
+                <b>Tables:</b> institutions, users, subjects, question_banks,
+                questions, exams, exam_sections, exam_batches, attempts,
+                answers, event_logs, scores, scorecards, audit_logs,
+                device_registrations<br />
+                <b>Partitioning:</b> answers & event_logs by date<br />
+                <b>UNLOGGED:</b> monitoring_state (transient, no WAL)<br />
+                <b>Encryption:</b> AES-256-GCM for question content
+              </div>
+              <div class="stack-bar">
+                <span
+                  class="stack-item"
+                  style="background: #065f46; color: #a7f3d0"
+                  >shared_buffers: 4GB</span
+                >
+                <span
+                  class="stack-item"
+                  style="background: #065f46; color: #a7f3d0"
+                  >max_conn: 200</span
+                >
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- FLOW LINE: Server ↔ DB -->
+        <div class="flow-line">
+          <span class="flow-label"
+            >Drizzle ORM · pg-pool · Parameterized Queries · UUIDv7</span
+          >
+        </div>
+      </div>
+
+      <!-- ===== DATA FLOWS SECTION ===== -->
+      <div style="width: 100%; max-width: 1100px; margin-top: 10px">
+        <div
+          style="
+            background: #111827;
+            border: 1px solid #1e293b;
+            border-radius: 16px;
+            padding: 24px;
+          "
+        >
+          <div
+            style="
+              font-size: 16px;
+              font-weight: 700;
+              color: #60a5fa;
+              margin-bottom: 16px;
+              text-align: center;
+            "
+          >
+            📡 Key Data Flows & Protocols
+          </div>
+          <div
+            style="
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 16px;
+              font-size: 12px;
+            "
+          >
+            <div
+              style="
+                background: #1e1b4b;
+                border-radius: 10px;
+                padding: 14px;
+                border: 1px solid #3730a3;
+              "
+            >
+              <div style="font-weight: 700; color: #a5b4fc; margin-bottom: 6px">
+                🔄 REST API (HTTPS)
+              </div>
+              <div style="color: #94a3b8; line-height: 1.6">
+                Login · Question bank CRUD · Exam creation · Candidate
+                management · Results export · File uploads<br />
+                <span style="color: #6366f1"
+                  >Fastify 5 · JSON Schema validation · JWT auth</span
+                >
+              </div>
+            </div>
+            <div
+              style="
+                background: #1e1b4b;
+                border-radius: 10px;
+                padding: 14px;
+                border: 1px solid #3730a3;
+              "
+            >
+              <div style="font-weight: 700; color: #a5b4fc; margin-bottom: 6px">
+                ⚡ WebSocket (WSS)
+              </div>
+              <div style="color: #94a3b8; line-height: 1.6">
+                Answer save (auto-save) · Heartbeat (30s) · Exam state sync ·
+                Live monitoring · Proctoring alerts<br />
+                <span style="color: #6366f1"
+                  >ws library · 44K msg/s · ~75MB/1K connections</span
+                >
+              </div>
+            </div>
+            <div
+              style="
+                background: #064e3b;
+                border-radius: 10px;
+                padding: 14px;
+                border: 1px solid #047857;
+              "
+            >
+              <div style="font-weight: 700; color: #6ee7b7; margin-bottom: 6px">
+                💾 Local SQLite (Client)
+              </div>
+              <div style="color: #94a3b8; line-height: 1.6">
+                Encrypted answer storage · Crash recovery · Offline resilience ·
+                WAL mode<br />
+                <span style="color: #10b981"
+                  >Microsoft.Data.Sqlite + SQLCipher · AES-256 · Sync API</span
+                >
+              </div>
+            </div>
+            <div
+              style="
+                background: #064e3b;
+                border-radius: 10px;
+                padding: 14px;
+                border: 1px solid #047857;
+              "
+            >
+              <div style="font-weight: 700; color: #6ee7b7; margin-bottom: 6px">
+                🔒 Security Layer
+              </div>
+              <div style="color: #94a3b8; line-height: 1.6">
+                TLS 1.2+ · Argon2id passwords · JWT (15min access / 7d refresh)
+                · Nonce replay protection · Audit hash chain<br />
+                Signed Exam Manifest (Ed25519) · Signed Security Policies ·
+                Embedded public key · Client as auditor<br />
+                <span style="color: #10b981"
+                  >OWASP Top 10 compliant · STRIDE threat modeled · Offline
+                  signing key</span
+                >
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== TECH STACK SUMMARY ===== -->
+      <div style="width: 100%; max-width: 1100px">
+        <div
+          style="
+            background: #111827;
+            border: 1px solid #1e293b;
+            border-radius: 16px;
+            padding: 24px;
+          "
+        >
+          <div
+            style="
+              font-size: 16px;
+              font-weight: 700;
+              color: #a78bfa;
+              margin-bottom: 16px;
+              text-align: center;
+            "
+          >
+            🏗️ 2026 Technology Stack (Architecture FROZEN v3.0)
+          </div>
+          <div
+            style="
+              display: grid;
+              grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+              gap: 12px;
+            "
+          >
+            <div
+              style="
+                background: #1e1b4b;
+                border-radius: 10px;
+                padding: 12px;
+                text-align: center;
+                border: 1px solid #3730a3;
+              "
+            >
+              <div style="font-size: 28px">🟢</div>
+              <div style="font-weight: 700; color: #a5b4fc; font-size: 13px">
+                Backend Runtime
+              </div>
+              <div style="color: #818cf8; font-size: 11px">
+                Node.js 24 LTS (Krypton)
+              </div>
+            </div>
+            <div
+              style="
+                background: #1e1b4b;
+                border-radius: 10px;
+                padding: 12px;
+                text-align: center;
+                border: 1px solid #3730a3;
+              "
+            >
+              <div style="font-size: 28px">⚡</div>
+              <div style="font-weight: 700; color: #a5b4fc; font-size: 13px">
+                Framework
+              </div>
+              <div style="color: #818cf8; font-size: 11px">Fastify 5.x</div>
+            </div>
+            <div
+              style="
+                background: #064e3b;
+                border-radius: 10px;
+                padding: 12px;
+                text-align: center;
+                border: 1px solid #047857;
+              "
+            >
+              <div style="font-size: 28px">🗄️</div>
+              <div style="font-weight: 700; color: #6ee7b7; font-size: 13px">
+                Database
+              </div>
+              <div style="color: #34d399; font-size: 11px">
+                PostgreSQL 18 (async I/O)
+              </div>
+            </div>
+            <div
+              style="
+                background: #064e3b;
+                border-radius: 10px;
+                padding: 12px;
+                text-align: center;
+                border: 1px solid #047857;
+              "
+            >
+              <div style="font-size: 28px">🔗</div>
+              <div style="font-weight: 700; color: #6ee7b7; font-size: 13px">
+                ORM
+              </div>
+              <div style="color: #34d399; font-size: 11px">
+                Drizzle ORM (SQL-first)
+              </div>
+            </div>
+            <div
+              style="
+                background: #831843;
+                border-radius: 10px;
+                padding: 12px;
+                text-align: center;
+                border: 1px solid #9d174d;
+              "
+            >
+              <div style="font-size: 28px">🖥️</div>
+              <div style="font-weight: 700; color: #f9a8d4; font-size: 13px">
+                Desktop Framework
+              </div>
+              <div style="color: #ec4899; font-size: 11px">C# WPF (.NET 8)</div>
+            </div>
+            <div
+              style="
+                background: #831843;
+                border-radius: 10px;
+                padding: 12px;
+                text-align: center;
+                border: 1px solid #9d174d;
+              "
+            >
+              <div style="font-size: 28px">🧩</div>
+              <div style="font-weight: 700; color: #f9a8d4; font-size: 13px">
+                MVVM Framework
+              </div>
+              <div style="color: #ec4899; font-size: 11px">
+                CommunityToolkit.Mvvm
+              </div>
+            </div>
+            <div
+              style="
+                background: #78350f;
+                border-radius: 10px;
+                padding: 12px;
+                text-align: center;
+                border: 1px solid #92400e;
+              "
+            >
+              <div style="font-size: 28px">🎨</div>
+              <div style="font-weight: 700; color: #fcd34d; font-size: 13px">
+                Styling
+              </div>
+              <div style="color: #f59e0b; font-size: 11px">
+                XAML + ResourceDictionary
+              </div>
+            </div>
+            <div
+              style="
+                background: #78350f;
+                border-radius: 10px;
+                padding: 12px;
+                text-align: center;
+                border: 1px solid #92400e;
+              "
+            >
+              <div style="font-size: 28px">📦</div>
+              <div style="font-weight: 700; color: #fcd34d; font-size: 13px">
+                Build Tool
+              </div>
+              <div style="color: #f59e0b; font-size: 11px">
+                MSBuild / Visual Studio
+              </div>
+            </div>
+            <div
+              style="
+                background: #1e1b4b;
+                border-radius: 10px;
+                padding: 12px;
+                text-align: center;
+                border: 1px solid #3730a3;
+              "
+            >
+              <div style="font-size: 28px">🔐</div>
+              <div style="font-weight: 700; color: #a5b4fc; font-size: 13px">
+                Password Hash
+              </div>
+              <div style="color: #818cf8; font-size: 11px">
+                Argon2id (OWASP 2026)
+              </div>
+            </div>
+            <div
+              style="
+                background: #1e1b4b;
+                border-radius: 10px;
+                padding: 12px;
+                text-align: center;
+                border: 1px solid #3730a3;
+              "
+            >
+              <div style="font-size: 28px">🧩</div>
+              <div style="font-weight: 700; color: #a5b4fc; font-size: 13px">
+                State (Client)
+              </div>
+              <div style="color: #818cf8; font-size: 11px">
+                CommunityToolkit.Mvvm
+              </div>
+            </div>
+            <div
+              style="
+                background: #1e1b4b;
+                border-radius: 10px;
+                padding: 12px;
+                text-align: center;
+                border: 1px solid #3730a3;
+              "
+            >
+              <div style="font-size: 28px">🌐</div>
+              <div style="font-weight: 700; color: #a5b4fc; font-size: 13px">
+                State (Admin)
+              </div>
+              <div style="color: #818cf8; font-size: 11px">
+                Zustand + TanStack Query
+              </div>
+            </div>
+            <div
+              style="
+                background: #1e1b4b;
+                border-radius: 10px;
+                padding: 12px;
+                text-align: center;
+                border: 1px solid #3730a3;
+              "
+            >
+              <div style="font-size: 28px">🧱</div>
+              <div style="font-weight: 700; color: #a5b4fc; font-size: 13px">
+                UI Components
+              </div>
+              <div style="color: #818cf8; font-size: 11px">
+                shadcn/ui (Radix)
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== LEGEND ===== -->
+      <div class="legend">
+        <div class="legend-item">
+          <div class="legend-dot" style="background: #3b82f6"></div>
+          LAN Trust Boundary
+        </div>
+        <div class="legend-item">
+          <div class="legend-dot" style="background: #8b5cf6"></div>
+          Exam Server (Fastify)
+        </div>
+        <div class="legend-item">
+          <div class="legend-dot" style="background: #10b981"></div>
+          Database (PostgreSQL 18)
+        </div>
+        <div class="legend-item">
+          <div class="legend-dot" style="background: #ec4899"></div>
+          Exam Client (C# WPF)
+        </div>
+        <div class="legend-item">
+          <div class="legend-dot" style="background: #34d399"></div>
+          Admin Dashboard (React)
+        </div>
+        <div class="legend-item">
+          <div class="legend-dot" style="background: #f59e0b"></div>
+          Nginx Reverse Proxy
+        </div>
+        <div class="legend-item">
+          <div class="legend-dot" style="background: #6366f1"></div>
+          ExamLauncher (Native AOT)
+        </div>
+      </div>
+
+      <div
+        style="
+          text-align: center;
+          color: #475569;
+          font-size: 11px;
+          margin-top: 12px;
+        "
+      >
+        CBT Platform · Architecture FROZEN v3.0 · Single-Server · 500 Concurrent
+        · 2026-07-16
+      </div>
+    </div>
+  </body>
+</html>
