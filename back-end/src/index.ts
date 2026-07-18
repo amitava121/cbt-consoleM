@@ -10,6 +10,7 @@ import { closePool } from "./database/db.js";
 import authRoutes from "./modules/auth/routes.js";
 import examBatchRoutes from "./modules/exams/exam-batch-routes.js";
 import examRoutes from "./modules/exams/exam-routes.js";
+import candidateExamRoutes from "./modules/candidate/candidate-exam-routes.js";
 import candidateRoutes from "./modules/organization/candidate-routes.js";
 import deviceRoutes from "./modules/organization/device-routes.js";
 import {
@@ -95,6 +96,79 @@ app.get("/api", async () => ({
   version: "0.1.0",
 }));
 
+// Also register health at /api/v1/health for spec compliance (envelope wrapped)
+app.get("/api/v1/health", async () => ({ success: true, data: { status: "ok", env: env.NODE_ENV } }));
+
+// Register /api/v1/* routes with response envelope (API_SPECIFICATION.md Section 2.5)
+await app.register(async (v1Scope) => {
+  // Apply response envelope to ALL routes in this scope
+  v1Scope.addHook("onSend", async (_request, reply, payload) => {
+    const ct = reply.getHeader("content-type");
+    if (typeof ct === "string" && !ct.includes("json")) return payload;
+    if (typeof payload !== "string" || payload.length === 0) return payload;
+
+    let parsed: unknown;
+    try { parsed = JSON.parse(payload); } catch { return payload; }
+
+    if (typeof parsed === "object" && parsed !== null && "success" in parsed) return payload;
+
+    const statusCode = reply.statusCode;
+    if (statusCode >= 200 && statusCode < 400) {
+      return JSON.stringify({ success: true, data: parsed });
+    } else {
+      let errorCode = "INTERNAL_ERROR";
+      let errorMessage = "An unexpected error occurred";
+      if (typeof parsed === "object" && parsed !== null && "error" in parsed) {
+        const errObj = parsed as Record<string, unknown>;
+        if (typeof errObj.error === "string") {
+          errorMessage = errObj.error;
+          const msg = errorMessage.toLowerCase();
+          if (statusCode === 401) errorCode = msg.includes("expired") ? "TOKEN_EXPIRED" : "UNAUTHORIZED";
+          else if (statusCode === 403) errorCode = msg.includes("device") ? "DEVICE_NOT_REGISTERED" : "FORBIDDEN";
+          else if (statusCode === 404) errorCode = "NOT_FOUND";
+          else if (statusCode === 409) errorCode = msg.includes("submitted") ? "ATTEMPT_ALREADY_SUBMITTED" : "CONFLICT";
+          else if (statusCode === 423) errorCode = msg.includes("lock") ? "LOCKED_OUT" : "EXAM_NOT_ACTIVE";
+          else if (statusCode === 429) errorCode = "RATE_LIMITED";
+          else if (statusCode === 400) errorCode = "VALIDATION_ERROR";
+        }
+      }
+      return JSON.stringify({ success: false, error: { code: errorCode, message: errorMessage } });
+    }
+  });
+
+  await v1Scope.register(authRoutes, { prefix: "/auth" });
+
+  await v1Scope.register(async (protectedScope) => {
+    protectedScope.addHook("onRequest", async (request, reply) => {
+      const authHeader = request.headers.authorization;
+      if (!authHeader?.startsWith("Bearer ")) {
+        return reply.code(401).send({ error: "Missing access token" });
+      }
+      try {
+        request.user = verifyToken(authHeader.slice(7));
+      } catch {
+        return reply.code(401).send({ error: "Invalid access token" });
+      }
+    });
+    await protectedScope.register(usersRoutes, { prefix: "/users" });
+    await protectedScope.register(institutionsRoutes, { prefix: "/institutions" });
+    await protectedScope.register(centersRoutes, { prefix: "/centers" });
+    await protectedScope.register(batchesRoutes, { prefix: "/batches" });
+    await protectedScope.register(subjectsRoutes, { prefix: "/subjects" });
+    await protectedScope.register(topicsRoutes, { prefix: "/topics" });
+    await protectedScope.register(questionBanksRoutes, { prefix: "/question-banks" });
+    await protectedScope.register(questionsRoutes, { prefix: "/questions" });
+    await protectedScope.register(importExportRoutes, { prefix: "/questions" });
+    await protectedScope.register(examRoutes, { prefix: "/exams" });
+    await protectedScope.register(examBatchRoutes, { prefix: "/exam-batches" });
+    await protectedScope.register(candidateRoutes, { prefix: "/candidates" });
+    await protectedScope.register(deviceRoutes, { prefix: "/devices" });
+    await protectedScope.register(sessionRoutes, { prefix: "/sessions" });
+    await protectedScope.register(candidateExamRoutes, { prefix: "/candidate/exams" });
+  });
+}, { prefix: "/api/v1" });
+
+// Keep old /api/ routes for backward compatibility with admin panel during migration
 await app.register(authRoutes, { prefix: "/api/auth" });
 
 await app.register(async (protectedScope) => {

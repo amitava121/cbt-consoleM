@@ -40,3 +40,22 @@ coverage/
 # Temporary files
 tmp/
 temp/
+
+# .NET build output
+bin/
+obj/
+*/bin/
+*/obj/
+**/bin/
+**/obj/
+*.user
+*.suo
+*.vs/
+.vs/
+*.DotSettings.user
+
+# NuGet
+packages/
+
+# Windows Client local data
+*.pem.bak

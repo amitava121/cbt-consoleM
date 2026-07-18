@@ -1,26 +1,22 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
-    <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <RootNamespace>CBT.ExamLauncher</RootNamespace>
-    <AssemblyName>ExamLauncher</AssemblyName>
-    
-    <!-- Native AOT compilation -->
-    <PublishAot>true</PublishAot>
-    <InvariantGlobalization>true</InvariantGlobalization>
+    <Nullable>enable</Nullable>
+    <RootNamespace>CBT.Shared</RootNamespace>
+    <AssemblyName>CBT.Shared</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Logging (shared between ExamClient and ExamLauncher) -->
     <PackageReference Include="Serilog" Version="4.2.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
     <PackageReference Include="Serilog.Formatting.Compact" Version="3.0.0" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\Shared\Shared.csproj" />
+    
+    <!-- WMI for hardware fingerprinting (SECURITY_ARCHITECTURE.md §5.2) -->
+    <PackageReference Include="System.Management" Version="8.0.0" />
   </ItemGroup>
 
 </Project>

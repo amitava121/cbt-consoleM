@@ -1,18 +1,21 @@
-# CBE Console — Windows Client
+# CBT Platform — Windows Exam Client
 
-.NET 8 WPF secure exam client plus a native AOT `ExamLauncher` watchdog process.
+.NET 8 WPF secure kiosk exam client with Native AOT `ExamLauncher` watchdog.
 
 ## Projects
 
-- **CBEConsoleClient** — WPF .NET 8 app (full-screen kiosk, MVVM, CommunityToolkit.Mvvm)
-- **ExamLauncher** — Native AOT console watchdog that launches and monitors the client
+| Project | Description |
+|---------|-------------|
+| **ExamClient** | WPF .NET 8 kiosk application (MVVM, CommunityToolkit.Mvvm, SQLCipher offline cache) |
+| **ExamLauncher** | Native AOT watchdog — starts, monitors, and restarts ExamClient on crash |
+| **Shared** | Class library shared between ExamClient and ExamLauncher (models, crypto, logging, config) |
 
 ## Build
 
-Requires Windows + .NET 8 SDK + WPF workload.
+Requires Windows + .NET 8 SDK with WPF workload.
 
 ```powershell
-dotnet build windows-client\CBEConsole.sln
+dotnet build windows-client\WindowsClient.sln
 ```
 
 Publish AOT watchdog:
@@ -21,9 +24,11 @@ Publish AOT watchdog:
 dotnet publish windows-client\ExamLauncher\ExamLauncher.csproj -c Release -r win-x64
 ```
 
-## Architecture notes
+## Architecture
 
-- Single WPF process; no browser shell or IPC.
-- Lockdown logic (key blocking, VM detection, URL filter) will be implemented in Win32 calls inside `MainWindow`/`Services`.
-- Local SQLite/SQLCipher storage for offline resilience.
-- Certificate pinning configured for LAN backend communication.
+- **Single WPF process** — no browser shell, no IPC
+- **Server communication** — REST (HttpClient) + WebSocket (ClientWebSocket) to Node.js/Fastify backend
+- **Server database** — PostgreSQL 18 (backend team manages)
+- **Client offline cache** — SQLCipher-encrypted SQLite (local answers, exam state, sync queue)
+- **Security** — Ed25519 manifest/policy verification, HMAC answer signing, certificate pinning, VM detection, keyboard lockdown
+- **Offline resilience** — answers saved locally first, queued for sync, delta sync on reconnect

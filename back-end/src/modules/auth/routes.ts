@@ -69,6 +69,9 @@ const authRoutes: FastifyPluginAsync = async (app) => {
         ) {
           return reply.code(403).send({ error: "Device suspended" });
         }
+
+        // Use the device registration UUID (not the string device_id) for session_tokens
+        (body as { _deviceUuid?: string })._deviceUuid = device.id;
       }
 
       const tokens = generateTokenPair({
@@ -81,19 +84,20 @@ const authRoutes: FastifyPluginAsync = async (app) => {
       const refreshJti = verifyToken(tokens.refreshToken).jti;
 
       await db.transaction(async (tx) => {
+        const deviceUuid = (body as { _deviceUuid?: string })._deviceUuid ?? null;
         await tx.insert(sessionTokens).values([
           {
             userId: user.id,
             tokenJti: accessJti,
             tokenType: "access",
-            deviceId: body.deviceId ?? null,
+            deviceId: deviceUuid,
             expiresAt: tokens.accessExpiresAt,
           },
           {
             userId: user.id,
             tokenJti: refreshJti,
             tokenType: "refresh",
-            deviceId: body.deviceId ?? null,
+            deviceId: deviceUuid,
             expiresAt: tokens.refreshExpiresAt,
           },
         ]);
@@ -104,11 +108,24 @@ const authRoutes: FastifyPluginAsync = async (app) => {
           .where(eq(users.id, user.id));
       });
 
+      // Response format per API_SPECIFICATION.md Section 3.1
+      const expiresInSeconds = Math.floor(
+        (tokens.accessExpiresAt.getTime() - Date.now()) / 1000
+      );
+
       return {
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
+        expiresIn: expiresInSeconds,
+        // Keep accessExpiresAt/refreshExpiresAt for admin panel backward compatibility
         accessExpiresAt: tokens.accessExpiresAt.toISOString(),
         refreshExpiresAt: tokens.refreshExpiresAt.toISOString(),
+        user: {
+          id: user.id,
+          email: user.email,
+          fullName: user.fullName,
+          role: user.role,
+        },
       };
     },
   );
@@ -182,9 +199,16 @@ const authRoutes: FastifyPluginAsync = async (app) => {
       },
     ]);
 
+    // Response format per API_SPECIFICATION.md Section 3.2
+    const expiresInSeconds = Math.floor(
+      (tokens.accessExpiresAt.getTime() - Date.now()) / 1000
+    );
+
     return {
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
+      expiresIn: expiresInSeconds,
+      // Keep for admin panel backward compatibility
       accessExpiresAt: tokens.accessExpiresAt.toISOString(),
       refreshExpiresAt: tokens.refreshExpiresAt.toISOString(),
     };

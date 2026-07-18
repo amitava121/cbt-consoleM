@@ -1,0 +1,49 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>CBT.ExamClient</RootNamespace>
+    <AssemblyName>ExamClient</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- MVVM Framework (CommunityToolkit.Mvvm with source generators) -->
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    
+    <!-- Dependency Injection -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
+    
+    <!-- SQLite with SQLCipher encryption (offline cache per CLIENT_ARCHITECTURE.md §11) -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.11" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlcipher" Version="2.1.10" />
+    
+    <!-- Logging -->
+    <PackageReference Include="Serilog" Version="4.2.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+    <PackageReference Include="Serilog.Formatting.Compact" Version="3.0.0" />
+    
+    <!-- WMI for hardware fingerprinting and VM detection -->
+    <PackageReference Include="System.Management" Version="8.0.0" />
+    
+    <!-- WebView2 for complex HTML question fragments (CLIENT_ARCHITECTURE.md §12.1) -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
+  </ItemGroup>
+
+
+
+  <ItemGroup>
+    <ProjectReference Include="..\Shared\Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Embedded public key for manifest/policy verification -->
+    <EmbeddedResource Include="Resources\exam-public.pem" />
+  </ItemGroup>
+
+</Project>
