@@ -135,13 +135,15 @@ internal class StubWebSocketService : IWebSocketService
         => ExamTerminated?.Invoke(this, payload);
 
     // Unused methods — stub implementations
-    public Task ConnectAsync(string url, string? token = null) => Task.CompletedTask;
+    public Task ConnectAsync(string serverEndpoint, string accessToken) => Task.CompletedTask;
     public Task DisconnectAsync() => Task.CompletedTask;
-    public Task SendHelloAsync(string attemptId, string candidateId, string examBatchId) => Task.CompletedTask;
-    public Task SendAnswerSaveAsync(string questionId, string answer) => Task.CompletedTask;
-    public Task SendAnswerBatchAsync(Dictionary<string, string> answers) => Task.CompletedTask;
-    public Task SendExamSubmitAsync(string attemptId, string nonce, string signature) => Task.CompletedTask;
-    public Task SendHeartbeatAsync() => Task.CompletedTask;
+    
+    public Task SendAnswerSaveAsync(AnswerSavePayload payload) => Task.CompletedTask;
+    public Task SendAnswerSaveBatchAsync(List<AnswerSavePayload> answers) => Task.CompletedTask;
+    public Task SendExamSubmitAsync(ExamSubmitPayload payload) => Task.CompletedTask;
+    public Task SendViolationReportAsync(ViolationReportPayload payload) => Task.CompletedTask;
+    public Task SendDeltaSyncRequestAsync(SyncDeltaRequestPayload payload) => Task.CompletedTask;
+    public Task SendHeartbeatAsync(HeartbeatPayload payload) => Task.CompletedTask;
     public Task SendSessionResumeAsync(string attemptId) => Task.CompletedTask;
-    public Task SendWarningAckAsync(string warningId) => Task.CompletedTask;
+    
 }
