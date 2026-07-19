@@ -24,6 +24,8 @@ public class LocalDbServiceTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         await _service.InitializeAsync(TestAttemptId, TestHardwareHash);
+        // Ensure clean state for each test
+        await _service.ClearAllAsync();
     }
 
     public async Task DisposeAsync()
