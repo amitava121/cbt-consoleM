@@ -21,6 +21,8 @@ const ExamBatchesPage = lazy(() => import("./pages/exam-batches"));
 const CandidatesPage = lazy(() => import("./pages/candidates"));
 const DevicesPage = lazy(() => import("./pages/devices"));
 const LiveMonitorPage = lazy(() => import("./pages/live-monitor"));
+const AuditLogsPage = lazy(() => import("./pages/audit-logs"));
+const SystemSettingsPage = lazy(() => import("./pages/system-settings"));
 
 function ProtectedRoute() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -83,6 +85,8 @@ export default function App() {
               <Route path="candidates" element={<CandidatesPage />} />
               <Route path="devices" element={<DevicesPage />} />
               <Route path="live-monitor" element={<LiveMonitorPage />} />
+              <Route path="audit-logs" element={<AuditLogsPage />} />
+              <Route path="system-settings" element={<SystemSettingsPage />} />
             </Route>
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

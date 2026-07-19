@@ -1,0 +1,41 @@
+name: Backend Tests
+
+on:
+  push:
+    paths:
+      - "back-end/**"
+      - ".github/workflows/backend-tests.yml"
+  pull_request:
+    paths:
+      - "back-end/**"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: back-end/package-lock.json
+
+      - name: Install dependencies
+        working-directory: back-end
+        run: npm ci
+
+      - name: Type check
+        working-directory: back-end
+        run: npx tsc --noEmit
+
+      - name: Run tests
+        working-directory: back-end
+        run: npx vitest run --reporter=verbose
+        env:
+          JWT_SECRET: "ci-test-secret-at-least-32-characters-long!!"
+          DATABASE_URL: "postgresql://fake:fake@localhost:5432/fake"
+          REDIS_URL: "redis://localhost:6379"
+          NODE_ENV: "test"
+          LOG_LEVEL: "silent"

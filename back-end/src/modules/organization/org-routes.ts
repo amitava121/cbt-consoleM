@@ -7,6 +7,7 @@ import {
     centers,
     institutions,
 } from "../../database/schemas/index.js";
+import { requireRole } from "../../middleware/rbac.js";
 
 /* ---------- Zod Schemas ---------- */
 
@@ -68,6 +69,8 @@ const updateBatchSchema = z.object({
 /* ---------- Institutions Routes ---------- */
 
 const institutionsRoutes: FastifyPluginAsync = async (app) => {
+  app.addHook("preHandler", requireRole("super_admin"));
+
   app.get("/", async (request) => {
     const parsed = listQuerySchema.safeParse(request.query);
     if (!parsed.success) return { error: "Invalid query parameters" };
@@ -156,118 +159,139 @@ const institutionsRoutes: FastifyPluginAsync = async (app) => {
 /* ---------- Centers Routes ---------- */
 
 const centersRoutes: FastifyPluginAsync = async (app) => {
-  app.get("/", async (request) => {
-    const parsed = listQuerySchema.safeParse(request.query);
-    if (!parsed.success) return { error: "Invalid query parameters" };
-    const { page, pageSize, search } = parsed.data;
-    const offset = (page - 1) * pageSize;
+  app.get(
+    "/",
+    { preHandler: requireRole("super_admin", "exam_admin") },
+    async (request) => {
+      const parsed = listQuerySchema.safeParse(request.query);
+      if (!parsed.success) return { error: "Invalid query parameters" };
+      const { page, pageSize, search } = parsed.data;
+      const offset = (page - 1) * pageSize;
 
-    const conditions = [];
-    if (search && search.length >= 3)
-      conditions.push(ilike(centers.name, `%${search}%`));
-    const institutionId = (request.query as { institutionId?: string })
-      .institutionId;
-    if (institutionId)
-      conditions.push(eq(centers.institutionId, institutionId));
+      const conditions = [];
+      if (search && search.length >= 3)
+        conditions.push(ilike(centers.name, `%${search}%`));
+      const institutionId = (request.query as { institutionId?: string })
+        .institutionId;
+      if (institutionId)
+        conditions.push(eq(centers.institutionId, institutionId));
 
-    const where = conditions.length > 0 ? and(...conditions) : undefined;
+      const where = conditions.length > 0 ? and(...conditions) : undefined;
 
-    const baseQuery = db
-      .select({
-        id: centers.id,
-        institutionId: centers.institutionId,
-        name: centers.name,
-        code: centers.code,
-        address: centers.address,
-        capacity: centers.capacity,
-        isActive: centers.isActive,
-        createdAt: centers.createdAt,
-        updatedAt: centers.updatedAt,
-        institutionName: institutions.name,
-      })
-      .from(centers)
-      .leftJoin(institutions, eq(centers.institutionId, institutions.id))
-      .orderBy(desc(centers.createdAt))
-      .limit(pageSize)
-      .offset(offset);
-    const countQuery = db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(centers);
-
-    const [rows, [{ count }]] = await Promise.all([
-      where ? baseQuery.where(where) : baseQuery,
-      where ? countQuery.where(where) : countQuery,
-    ]);
-
-    return { data: rows, total: count, page, pageSize };
-  });
-
-  app.post("/", async (request, reply) => {
-    const parsed = createCenterSchema.safeParse(request.body);
-    if (!parsed.success)
-      return reply.code(400).send({
-        error: "Invalid request body",
-        details: parsed.error.flatten(),
-      });
-
-    const [existing] = await db
-      .select({ id: centers.id })
-      .from(centers)
-      .where(eq(centers.code, parsed.data.code))
-      .limit(1);
-    if (existing)
-      return reply.code(409).send({ error: "Center code already exists" });
-
-    const [center] = await db.insert(centers).values(parsed.data).returning();
-    return reply.code(201).send(center);
-  });
-
-  app.put("/:id", async (request, reply) => {
-    const id = (request.params as { id: string }).id;
-    const parsed = updateCenterSchema.safeParse(request.body);
-    if (!parsed.success)
-      return reply.code(400).send({
-        error: "Invalid request body",
-        details: parsed.error.flatten(),
-      });
-
-    const [updated] = await db
-      .update(centers)
-      .set({ ...parsed.data, updatedAt: new Date() })
-      .where(eq(centers.id, id))
-      .returning();
-    if (!updated) return reply.code(404).send({ error: "Center not found" });
-    return updated;
-  });
-
-  app.get("/:id/batches", async (request) => {
-    const id = (request.params as { id: string }).id;
-    const query = request.query as { page?: string; pageSize?: string };
-    const page = Math.max(1, parseInt(query.page ?? "1"));
-    const pageSize = Math.min(100, Math.max(1, parseInt(query.pageSize ?? "50")));
-    const offset = (page - 1) * pageSize;
-
-    const [rows, [{ count }]] = await Promise.all([
-      db
-        .select()
-        .from(batches)
-        .where(eq(batches.centerId, id))
-        .orderBy(desc(batches.createdAt))
+      const baseQuery = db
+        .select({
+          id: centers.id,
+          institutionId: centers.institutionId,
+          name: centers.name,
+          code: centers.code,
+          address: centers.address,
+          capacity: centers.capacity,
+          isActive: centers.isActive,
+          createdAt: centers.createdAt,
+          updatedAt: centers.updatedAt,
+          institutionName: institutions.name,
+        })
+        .from(centers)
+        .leftJoin(institutions, eq(centers.institutionId, institutions.id))
+        .orderBy(desc(centers.createdAt))
         .limit(pageSize)
-        .offset(offset),
-      db
+        .offset(offset);
+      const countQuery = db
         .select({ count: sql<number>`count(*)::int` })
-        .from(batches)
-        .where(eq(batches.centerId, id)),
-    ]);
+        .from(centers);
 
-    return { data: rows, total: count, page, pageSize };
-  });
+      const [rows, [{ count }]] = await Promise.all([
+        where ? baseQuery.where(where) : baseQuery,
+        where ? countQuery.where(where) : countQuery,
+      ]);
+
+      return { data: rows, total: count, page, pageSize };
+    },
+  );
+
+  app.post(
+    "/",
+    { preHandler: requireRole("super_admin") },
+    async (request, reply) => {
+      const parsed = createCenterSchema.safeParse(request.body);
+      if (!parsed.success)
+        return reply.code(400).send({
+          error: "Invalid request body",
+          details: parsed.error.flatten(),
+        });
+
+      const [existing] = await db
+        .select({ id: centers.id })
+        .from(centers)
+        .where(eq(centers.code, parsed.data.code))
+        .limit(1);
+      if (existing)
+        return reply.code(409).send({ error: "Center code already exists" });
+
+      const [center] = await db.insert(centers).values(parsed.data).returning();
+      return reply.code(201).send(center);
+    },
+  );
+
+  app.put(
+    "/:id",
+    { preHandler: requireRole("super_admin") },
+    async (request, reply) => {
+      const id = (request.params as { id: string }).id;
+      const parsed = updateCenterSchema.safeParse(request.body);
+      if (!parsed.success)
+        return reply.code(400).send({
+          error: "Invalid request body",
+          details: parsed.error.flatten(),
+        });
+
+      const [updated] = await db
+        .update(centers)
+        .set({ ...parsed.data, updatedAt: new Date() })
+        .where(eq(centers.id, id))
+        .returning();
+      if (!updated) return reply.code(404).send({ error: "Center not found" });
+      return updated;
+    },
+  );
+
+  app.get(
+    "/:id/batches",
+    { preHandler: requireRole("super_admin", "exam_admin") },
+    async (request) => {
+      const id = (request.params as { id: string }).id;
+      const query = request.query as { page?: string; pageSize?: string };
+      const page = Math.max(1, parseInt(query.page ?? "1"));
+      const pageSize = Math.min(
+        100,
+        Math.max(1, parseInt(query.pageSize ?? "50")),
+      );
+      const offset = (page - 1) * pageSize;
+
+      const [rows, [{ count }]] = await Promise.all([
+        db
+          .select()
+          .from(batches)
+          .where(eq(batches.centerId, id))
+          .orderBy(desc(batches.createdAt))
+          .limit(pageSize)
+          .offset(offset),
+        db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(batches)
+          .where(eq(batches.centerId, id)),
+      ]);
+
+      return { data: rows, total: count, page, pageSize };
+    },
+  );
 };
 
 /* ---------- Batches Routes ---------- */
 
 const batchesRoutes: FastifyPluginAsync = async (app) => {
+  app.addHook("preHandler", requireRole("super_admin", "exam_admin"));
+
   app.get("/", async (request) => {
     const parsed = listQuerySchema.safeParse(request.query);
     if (!parsed.success) return { error: "Invalid query parameters" };

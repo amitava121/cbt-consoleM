@@ -10,6 +10,10 @@ import {
     exams,
     violationReports,
 } from "../../database/schemas/index.js";
+import {
+    cancelAutoSubmit,
+    scheduleAutoSubmit,
+} from "../../services/timer-scheduler.js";
 
 type AttemptStatus =
   | "not_started"
@@ -149,6 +153,10 @@ export async function startOrResumeAttempt(opts: {
       createdAt: new Date(now),
     });
 
+    // Schedule auto-submit in Redis ZSET at exact expiry time
+    const expiryMs = now + remainingTimeSecs * 1000;
+    await scheduleAutoSubmit(a.id, a.candidateId, expiryMs);
+
     return {
       attemptId: a.id,
       status: "in_progress",
@@ -173,6 +181,7 @@ export async function startOrResumeAttempt(opts: {
     }
 
     if (remainingSecs <= 0 && a.status === "in_progress") {
+      await cancelAutoSubmit(a.id);
       await autoSubmitAttempt(a.id, "time_expired");
       return {
         attemptId: a.id,
@@ -196,6 +205,13 @@ export async function startOrResumeAttempt(opts: {
         ...(a.status === "paused" ? {} : { remainingTimeSecs: remainingSecs }),
       })
       .where(eq(attempts.id, a.id));
+
+    // Reschedule auto-submit with updated remaining time (only if in_progress, not paused)
+    if (a.status === "in_progress") {
+      const expiryMs = now + remainingSecs * 1000;
+      await cancelAutoSubmit(a.id);
+      await scheduleAutoSubmit(a.id, a.candidateId, expiryMs);
+    }
 
     await db.insert(eventLogs).values({
       attemptId: a.id,
@@ -405,6 +421,9 @@ export async function pauseAttempt(
     })
     .where(eq(attempts.id, attemptId));
 
+  // Cancel the Redis auto-submit timer — attempt is paused
+  await cancelAutoSubmit(attemptId);
+
   await db.insert(eventLogs).values({
     attemptId,
     eventType: "session_paused",
@@ -422,6 +441,7 @@ export async function resumeAttempt(
   const attempt = await db
     .select({
       status: attempts.status,
+      candidateId: attempts.candidateId,
       remainingTimeSecs: attempts.remainingTimeSecs,
     })
     .from(attempts)
@@ -444,6 +464,10 @@ export async function resumeAttempt(
       updatedAt: now,
     })
     .where(eq(attempts.id, attemptId));
+
+  // Schedule auto-submit in Redis ZSET at exact expiry time
+  const expiryMs = now.getTime() + remainingSecs * 1000;
+  await scheduleAutoSubmit(attemptId, attempt[0].candidateId, expiryMs);
 
   await db.insert(eventLogs).values({
     attemptId,
@@ -471,6 +495,9 @@ export async function submitAttempt(
     })
     .where(eq(attempts.id, attemptId));
 
+  // Cancel any pending auto-submit timer
+  await cancelAutoSubmit(attemptId);
+
   await db.insert(eventLogs).values({
     attemptId,
     eventType: "session_submitted",
@@ -496,6 +523,9 @@ export async function autoSubmitAttempt(
     })
     .where(eq(attempts.id, attemptId));
 
+  // Cancel any pending auto-submit timer (in case this was called reactively)
+  await cancelAutoSubmit(attemptId);
+
   await db.insert(eventLogs).values({
     attemptId,
     eventType: "session_auto_submitted",
@@ -520,6 +550,9 @@ export async function terminateAttempt(
       updatedAt: now,
     })
     .where(eq(attempts.id, attemptId));
+
+  // Cancel any pending auto-submit timer
+  await cancelAutoSubmit(attemptId);
 
   await db.insert(eventLogs).values({
     attemptId,

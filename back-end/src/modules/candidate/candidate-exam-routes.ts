@@ -2,20 +2,21 @@ import { and, eq, inArray } from "drizzle-orm";
 import { type FastifyPluginAsync } from "fastify";
 import { db } from "../../database/db.js";
 import {
-  attempts,
-  deviceRegistrations,
-  examBatchCandidates,
-  examBatches,
-  examQuestions,
-  examSections,
-  exams,
-  questionOptions,
-  questions,
+    attempts,
+    deviceRegistrations,
+    examBatchCandidates,
+    examBatches,
+    examQuestions,
+    examSections,
+    exams,
+    questionOptions,
+    questions,
 } from "../../database/schemas/index.js";
+import { requireRole } from "../../middleware/rbac.js";
 
 /**
  * Candidate exam endpoints per API_SPECIFICATION.md Section 5.1.
- * 
+ *
  * GET  /candidate/exams               — List assigned exams
  * GET  /candidate/exams/:batchId      — Get exam metadata
  * GET  /candidate/exams/:batchId/questions — Get exam questions
@@ -23,6 +24,8 @@ import {
  * GET  /candidate/exams/:batchId/manifest — Get signed exam manifest
  */
 const candidateExamRoutes: FastifyPluginAsync = async (app) => {
+  app.addHook("preHandler", requireRole("candidate"));
+
   // ─── GET /candidate/exams — List assigned exams for the logged-in candidate ───
   app.get("/", async (request, _reply) => {
     const userId = request.user.sub;
@@ -42,7 +45,10 @@ const candidateExamRoutes: FastifyPluginAsync = async (app) => {
         examInstructions: exams.instructionsJson,
       })
       .from(examBatchCandidates)
-      .innerJoin(examBatches, eq(examBatches.id, examBatchCandidates.examBatchId))
+      .innerJoin(
+        examBatches,
+        eq(examBatches.id, examBatchCandidates.examBatchId),
+      )
       .innerJoin(exams, eq(exams.id, examBatches.examId))
       .where(eq(examBatchCandidates.candidateId, userId));
 
@@ -191,7 +197,15 @@ const candidateExamRoutes: FastifyPluginAsync = async (app) => {
 
     // Get options (without isCorrect — never expose to candidate)
     const questionIds = examQs.map((q) => q.questionId);
-    const optionsMap: Record<string, Array<{ id: string; text: string; optionMediaUrl: string | null; displayOrder: number }>> = {};
+    const optionsMap: Record<
+      string,
+      Array<{
+        id: string;
+        text: string;
+        optionMediaUrl: string | null;
+        displayOrder: number;
+      }>
+    > = {};
 
     if (questionIds.length > 0) {
       const opts = await db
@@ -215,7 +229,8 @@ const candidateExamRoutes: FastifyPluginAsync = async (app) => {
 
     // Return in CLIENT_ARCHITECTURE.md Question model format
     return examQs.map((q) => {
-      const content = typeof q.qContent === "string" ? JSON.parse(q.qContent) : q.qContent;
+      const content =
+        typeof q.qContent === "string" ? JSON.parse(q.qContent) : q.qContent;
       return {
         id: q.questionId,
         sectionId: q.examSectionId,
@@ -303,14 +318,19 @@ const candidateExamRoutes: FastifyPluginAsync = async (app) => {
       .limit(1);
 
     if (existingAttempt) {
-      if (existingAttempt.status === "submitted" || existingAttempt.status === "auto_submitted") {
+      if (
+        existingAttempt.status === "submitted" ||
+        existingAttempt.status === "auto_submitted"
+      ) {
         return reply.code(409).send({ error: "Exam already submitted" });
       }
 
       // Resume existing attempt
       const durationSecs = (batch.examDuration ?? 180) * 60;
       const elapsed = existingAttempt.startedAt
-        ? Math.floor((Date.now() - new Date(existingAttempt.startedAt).getTime()) / 1000)
+        ? Math.floor(
+            (Date.now() - new Date(existingAttempt.startedAt).getTime()) / 1000,
+          )
         : 0;
       const remaining = Math.max(0, durationSecs - elapsed);
 
@@ -325,7 +345,8 @@ const candidateExamRoutes: FastifyPluginAsync = async (app) => {
         attemptId: existingAttempt.id,
         examBatchId: batchId,
         status: existingAttempt.status,
-        startedAt: existingAttempt.startedAt?.toISOString() ?? new Date().toISOString(),
+        startedAt:
+          existingAttempt.startedAt?.toISOString() ?? new Date().toISOString(),
         durationSeconds: durationSecs,
         remainingTimeSeconds: remaining,
         sections: sections.map((s) => ({
@@ -422,7 +443,9 @@ const candidateExamRoutes: FastifyPluginAsync = async (app) => {
       examBatchId: batchId,
       version: 1,
       issuedAt: new Date().toISOString(),
-      expiresAt: batch.scheduledEnd?.toISOString() ?? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      expiresAt:
+        batch.scheduledEnd?.toISOString() ??
+        new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       exam: {
         title: batch.examName,
         durationMinutes: batch.examDuration,

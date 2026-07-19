@@ -8,6 +8,7 @@ import {
     centers,
     users,
 } from "../../database/schemas/index.js";
+import { requireRole } from "../../middleware/rbac.js";
 
 /* ---------- Zod Schemas ---------- */
 
@@ -59,6 +60,8 @@ const bulkImportSchema = z.object({
 /* ---------- Route Plugin ---------- */
 
 const candidateRoutes: FastifyPluginAsync = async (app) => {
+  app.addHook("preHandler", requireRole("super_admin", "exam_admin"));
+
   /* ----- GET /candidates — list with pagination + filters ----- */
   app.get("/", async (request, reply) => {
     const parsed = listQuerySchema.safeParse(request.query);

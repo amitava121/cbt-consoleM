@@ -1,21 +1,23 @@
 import {
-  Activity,
-  BookOpen,
-  Building2,
-  CalendarClock,
-  ChevronDown,
-  ClipboardList,
-  FolderArchive,
-  HelpCircle,
-  LayoutDashboard,
-  LogOut,
-  MapPin,
-  Monitor,
-  PanelLeft,
-  PanelLeftClose,
-  UserCog,
-  Users,
-  UsersRound,
+    Activity,
+    BookOpen,
+    Building2,
+    CalendarClock,
+    ChevronDown,
+    ClipboardList,
+    FolderArchive,
+    HelpCircle,
+    LayoutDashboard,
+    LogOut,
+    MapPin,
+    Monitor,
+    PanelLeft,
+    PanelLeftClose,
+    ScrollText,
+    Settings,
+    UserCog,
+    Users,
+    UsersRound,
 } from "lucide-react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../../stores/auth-store";
@@ -23,11 +25,11 @@ import { useUIStore } from "../../stores/ui-store";
 import { Avatar, AvatarFallback } from "../ui/avatar";
 import { Button } from "../ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 import { Separator } from "../ui/separator";
 
@@ -68,6 +70,18 @@ const navItems = [
     to: "/live-monitor",
     label: "Live Monitor",
     icon: Activity,
+    end: false,
+  },
+  {
+    to: "/audit-logs",
+    label: "Audit Logs",
+    icon: ScrollText,
+    end: false,
+  },
+  {
+    to: "/system-settings",
+    label: "System Settings",
+    icon: Settings,
     end: false,
   },
 ];

@@ -14,6 +14,7 @@ import {
     examSchedules,
     exams,
 } from "../../database/schemas/index.js";
+import { requireRole } from "../../middleware/rbac.js";
 
 /* ---------- Schemas ---------- */
 
@@ -58,198 +59,222 @@ function assertTransition(current: string, target: string): boolean {
 
 const examBatchRoutes: FastifyPluginAsync = async (app) => {
   /* ----- GET /exam-batches — list with pagination + filters ----- */
-  app.get("/", async (request, reply) => {
-    const query = request.query as {
-      page?: string;
-      pageSize?: string;
-      search?: string;
-      examId?: string;
-      status?: string;
-    };
-    const page = Math.max(1, parseInt(query.page ?? "1"));
-    const pageSize = Math.min(
-      100,
-      Math.max(1, parseInt(query.pageSize ?? "20")),
-    );
-    const search = query.search?.trim();
+  app.get(
+    "/",
+    { preHandler: requireRole("super_admin", "exam_admin", "proctor") },
+    async (request, reply) => {
+      const query = request.query as {
+        page?: string;
+        pageSize?: string;
+        search?: string;
+        examId?: string;
+        status?: string;
+      };
+      const page = Math.max(1, parseInt(query.page ?? "1"));
+      const pageSize = Math.min(
+        100,
+        Math.max(1, parseInt(query.pageSize ?? "20")),
+      );
+      const search = query.search?.trim();
 
-    const conditions = [];
-    if (search && search.length >= 3)
-      conditions.push(ilike(examBatches.name, `%${search}%`));
-    if (query.examId) conditions.push(eq(examBatches.examId, query.examId));
-    if (query.status)
-      conditions.push(eq(examBatches.status, query.status as never));
+      const conditions = [];
+      if (search && search.length >= 3)
+        conditions.push(ilike(examBatches.name, `%${search}%`));
+      if (query.examId) conditions.push(eq(examBatches.examId, query.examId));
+      if (query.status)
+        conditions.push(eq(examBatches.status, query.status as never));
 
-    const where = conditions.length > 0 ? and(...conditions) : undefined;
-    const offset = (page - 1) * pageSize;
+      const where = conditions.length > 0 ? and(...conditions) : undefined;
+      const offset = (page - 1) * pageSize;
 
-    const [rows, countResult] = await Promise.all([
-      db
-        .select({
-          id: examBatches.id,
-          examId: examBatches.examId,
-          batchId: examBatches.batchId,
-          centerId: examBatches.centerId,
-          name: examBatches.name,
-          status: examBatches.status,
-          shiftNumber: examBatches.shiftNumber,
-          scheduledStartAt: examBatches.scheduledStartAt,
-          scheduledEndAt: examBatches.scheduledEndAt,
-          actualStartAt: examBatches.actualStartAt,
-          actualEndAt: examBatches.actualEndAt,
-          gracePeriodMinutes: examBatches.gracePeriodMinutes,
-          createdAt: examBatches.createdAt,
-          updatedAt: examBatches.updatedAt,
-        })
-        .from(examBatches)
-        .where(where)
-        .orderBy(asc(examBatches.scheduledStartAt))
-        .limit(pageSize)
-        .offset(offset),
-      db
-        .select({ count: sql<number>`COUNT(*)::int` })
-        .from(examBatches)
-        .where(where),
-    ]);
+      const [rows, countResult] = await Promise.all([
+        db
+          .select({
+            id: examBatches.id,
+            examId: examBatches.examId,
+            batchId: examBatches.batchId,
+            centerId: examBatches.centerId,
+            name: examBatches.name,
+            status: examBatches.status,
+            shiftNumber: examBatches.shiftNumber,
+            scheduledStartAt: examBatches.scheduledStartAt,
+            scheduledEndAt: examBatches.scheduledEndAt,
+            actualStartAt: examBatches.actualStartAt,
+            actualEndAt: examBatches.actualEndAt,
+            gracePeriodMinutes: examBatches.gracePeriodMinutes,
+            createdAt: examBatches.createdAt,
+            updatedAt: examBatches.updatedAt,
+          })
+          .from(examBatches)
+          .where(where)
+          .orderBy(asc(examBatches.scheduledStartAt))
+          .limit(pageSize)
+          .offset(offset),
+        db
+          .select({ count: sql<number>`COUNT(*)::int` })
+          .from(examBatches)
+          .where(where),
+      ]);
 
-    return reply.send({
-      data: rows,
-      total: countResult[0]?.count ?? 0,
-      page,
-      pageSize,
-    });
-  });
+      return reply.send({
+        data: rows,
+        total: countResult[0]?.count ?? 0,
+        page,
+        pageSize,
+      });
+    },
+  );
 
   /* ----- POST /exam-batches — create ----- */
-  app.post("/", async (request, reply) => {
-    const parsed = createBatchSchema.safeParse(request.body);
-    if (!parsed.success)
-      return reply.code(400).send({
-        error: "Validation failed",
-        details: parsed.error.flatten().fieldErrors,
-      });
+  app.post(
+    "/",
+    { preHandler: requireRole("super_admin", "exam_admin") },
+    async (request, reply) => {
+      const parsed = createBatchSchema.safeParse(request.body);
+      if (!parsed.success)
+        return reply.code(400).send({
+          error: "Validation failed",
+          details: parsed.error.flatten().fieldErrors,
+        });
 
-    const { instructions, settings, ...batchFields } = parsed.data;
+      const { instructions, settings, ...batchFields } = parsed.data;
 
-    // Verify exam exists
-    const [exam] = await db
-      .select({ id: exams.id })
-      .from(exams)
-      .where(eq(exams.id, parsed.data.examId))
-      .limit(1);
-    if (!exam) return reply.code(404).send({ error: "Exam not found" });
+      // Verify exam exists
+      const [exam] = await db
+        .select({ id: exams.id })
+        .from(exams)
+        .where(eq(exams.id, parsed.data.examId))
+        .limit(1);
+      if (!exam) return reply.code(404).send({ error: "Exam not found" });
 
-    const [batch] = await db
-      .insert(examBatches)
-      .values({
-        ...batchFields,
-        scheduledStartAt: new Date(parsed.data.scheduledStartAt),
-        scheduledEndAt: new Date(parsed.data.scheduledEndAt),
-        instructionsJson: (instructions as Record<string, unknown>) ?? null,
-        settingsJson: (settings as Record<string, unknown>) ?? null,
-        createdBy: request.user.sub,
-      } as typeof examBatches.$inferInsert)
-      .returning();
+      const [batch] = await db
+        .insert(examBatches)
+        .values({
+          ...batchFields,
+          scheduledStartAt: new Date(parsed.data.scheduledStartAt),
+          scheduledEndAt: new Date(parsed.data.scheduledEndAt),
+          instructionsJson: (instructions as Record<string, unknown>) ?? null,
+          settingsJson: (settings as Record<string, unknown>) ?? null,
+          createdBy: request.user.sub,
+        } as typeof examBatches.$inferInsert)
+        .returning();
 
-    return reply.code(201).send(batch);
-  });
+      return reply.code(201).send(batch);
+    },
+  );
 
   /* ----- GET /exam-batches/:id — get details (parallel fetch) ----- */
-  app.get("/:id", async (request, reply) => {
-    const { id } = request.params as { id: string };
+  app.get(
+    "/:id",
+    { preHandler: requireRole("super_admin", "exam_admin", "proctor") },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
 
-    const [batch, schedules, candidateCount] = await Promise.all([
-      db
-        .select({
-          id: examBatches.id,
-          examId: examBatches.examId,
-          batchId: examBatches.batchId,
-          centerId: examBatches.centerId,
-          name: examBatches.name,
-          status: examBatches.status,
-          shiftNumber: examBatches.shiftNumber,
-          scheduledStartAt: examBatches.scheduledStartAt,
-          scheduledEndAt: examBatches.scheduledEndAt,
-          actualStartAt: examBatches.actualStartAt,
-          actualEndAt: examBatches.actualEndAt,
-          gracePeriodMinutes: examBatches.gracePeriodMinutes,
-          instructionsJson: examBatches.instructionsJson,
-          settingsJson: examBatches.settingsJson,
-          createdBy: examBatches.createdBy,
-          createdAt: examBatches.createdAt,
-          updatedAt: examBatches.updatedAt,
-        })
-        .from(examBatches)
-        .where(eq(examBatches.id, id))
-        .limit(1),
-      db
-        .select({
-          id: examSchedules.id,
-          examBatchId: examSchedules.examBatchId,
-          startAt: examSchedules.startAt,
-          endAt: examSchedules.endAt,
-          isActive: examSchedules.isActive,
-          createdAt: examSchedules.createdAt,
-        })
-        .from(examSchedules)
-        .where(eq(examSchedules.examBatchId, id))
-        .orderBy(asc(examSchedules.startAt)),
-      db
-        .select({ count: sql<number>`COUNT(*)::int` })
-        .from(examBatchCandidates)
-        .where(eq(examBatchCandidates.examBatchId, id)),
-    ]);
+      const [batch, schedules, candidateCount] = await Promise.all([
+        db
+          .select({
+            id: examBatches.id,
+            examId: examBatches.examId,
+            batchId: examBatches.batchId,
+            centerId: examBatches.centerId,
+            name: examBatches.name,
+            status: examBatches.status,
+            shiftNumber: examBatches.shiftNumber,
+            scheduledStartAt: examBatches.scheduledStartAt,
+            scheduledEndAt: examBatches.scheduledEndAt,
+            actualStartAt: examBatches.actualStartAt,
+            actualEndAt: examBatches.actualEndAt,
+            gracePeriodMinutes: examBatches.gracePeriodMinutes,
+            instructionsJson: examBatches.instructionsJson,
+            settingsJson: examBatches.settingsJson,
+            createdBy: examBatches.createdBy,
+            createdAt: examBatches.createdAt,
+            updatedAt: examBatches.updatedAt,
+          })
+          .from(examBatches)
+          .where(eq(examBatches.id, id))
+          .limit(1),
+        db
+          .select({
+            id: examSchedules.id,
+            examBatchId: examSchedules.examBatchId,
+            startAt: examSchedules.startAt,
+            endAt: examSchedules.endAt,
+            isActive: examSchedules.isActive,
+            createdAt: examSchedules.createdAt,
+          })
+          .from(examSchedules)
+          .where(eq(examSchedules.examBatchId, id))
+          .orderBy(asc(examSchedules.startAt)),
+        db
+          .select({ count: sql<number>`COUNT(*)::int` })
+          .from(examBatchCandidates)
+          .where(eq(examBatchCandidates.examBatchId, id)),
+      ]);
 
-    if (!batch) return reply.code(404).send({ error: "Exam batch not found" });
+      if (!batch)
+        return reply.code(404).send({ error: "Exam batch not found" });
 
-    return reply.send({
-      ...batch,
-      schedules,
-      candidateCount: candidateCount[0]?.count ?? 0,
-    });
-  });
+      return reply.send({
+        ...batch,
+        schedules,
+        candidateCount: candidateCount[0]?.count ?? 0,
+      });
+    },
+  );
 
   /* ----- PUT /exam-batches/:id — update ----- */
-  app.put("/:id", async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const parsed = updateBatchSchema.safeParse(request.body);
-    if (!parsed.success)
-      return reply.code(400).send({
-        error: "Validation failed",
-        details: parsed.error.flatten().fieldErrors,
-      });
+  app.put(
+    "/:id",
+    { preHandler: requireRole("super_admin", "exam_admin") },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const parsed = updateBatchSchema.safeParse(request.body);
+      if (!parsed.success)
+        return reply.code(400).send({
+          error: "Validation failed",
+          details: parsed.error.flatten().fieldErrors,
+        });
 
-    const {
-      instructions,
-      settings,
-      scheduledStartAt,
-      scheduledEndAt,
-      ...fields
-    } = parsed.data;
+      const {
+        instructions,
+        settings,
+        scheduledStartAt,
+        scheduledEndAt,
+        ...fields
+      } = parsed.data;
 
-    const [updated] = await db
-      .update(examBatches)
-      .set({
-        ...fields,
-        ...(scheduledStartAt
-          ? { scheduledStartAt: new Date(scheduledStartAt) }
-          : {}),
-        ...(scheduledEndAt ? { scheduledEndAt: new Date(scheduledEndAt) } : {}),
-        ...(instructions !== undefined
-          ? { instructionsJson: instructions as Record<string, unknown> | null }
-          : {}),
-        ...(settings !== undefined
-          ? { settingsJson: settings as Record<string, unknown> | null }
-          : {}),
-        updatedAt: new Date(),
-      } as Partial<typeof examBatches.$inferInsert>)
-      .where(eq(examBatches.id, id))
-      .returning();
+      const [updated] = await db
+        .update(examBatches)
+        .set({
+          ...fields,
+          ...(scheduledStartAt
+            ? { scheduledStartAt: new Date(scheduledStartAt) }
+            : {}),
+          ...(scheduledEndAt
+            ? { scheduledEndAt: new Date(scheduledEndAt) }
+            : {}),
+          ...(instructions !== undefined
+            ? {
+                instructionsJson: instructions as Record<
+                  string,
+                  unknown
+                > | null,
+              }
+            : {}),
+          ...(settings !== undefined
+            ? { settingsJson: settings as Record<string, unknown> | null }
+            : {}),
+          updatedAt: new Date(),
+        } as Partial<typeof examBatches.$inferInsert>)
+        .where(eq(examBatches.id, id))
+        .returning();
 
-    if (!updated)
-      return reply.code(404).send({ error: "Exam batch not found" });
-    return reply.send(updated);
-  });
+      if (!updated)
+        return reply.code(404).send({ error: "Exam batch not found" });
+      return reply.send(updated);
+    },
+  );
 
   /* ----- Lifecycle: POST /exam-batches/:id/:action -----
    *
@@ -305,23 +330,36 @@ const examBatchRoutes: FastifyPluginAsync = async (app) => {
     return reply.code(result.code).send(result.body);
   };
 
-  app.post("/:id/publish", async (request, reply) =>
-    lifecycleHandler(request, reply, "published"),
+  app.post(
+    "/:id/publish",
+    { preHandler: requireRole("super_admin", "exam_admin") },
+    async (request, reply) => lifecycleHandler(request, reply, "published"),
   );
-  app.post("/:id/activate", async (request, reply) =>
-    lifecycleHandler(request, reply, "active"),
+  app.post(
+    "/:id/activate",
+    { preHandler: requireRole("super_admin", "exam_admin") },
+    async (request, reply) => lifecycleHandler(request, reply, "active"),
   );
-  app.post("/:id/pause", async (request, reply) =>
-    lifecycleHandler(request, reply, "paused"),
+  app.post(
+    "/:id/pause",
+    { preHandler: requireRole("super_admin", "exam_admin") },
+    async (request, reply) => lifecycleHandler(request, reply, "paused"),
   );
-  app.post("/:id/resume", async (request, reply) =>
-    lifecycleHandler(request, reply, "active"),
+  app.post(
+    "/:id/resume",
+    { preHandler: requireRole("super_admin", "exam_admin") },
+    async (request, reply) => lifecycleHandler(request, reply, "active"),
   );
-  app.post("/:id/finish", async (request, reply) =>
-    lifecycleHandler(request, reply, "finished"),
+  app.post(
+    "/:id/finish",
+    { preHandler: requireRole("super_admin", "exam_admin") },
+    async (request, reply) => lifecycleHandler(request, reply, "finished"),
   );
-  app.post("/:id/publish-results", async (request, reply) =>
-    lifecycleHandler(request, reply, "results_published"),
+  app.post(
+    "/:id/publish-results",
+    { preHandler: requireRole("super_admin", "exam_admin") },
+    async (request, reply) =>
+      lifecycleHandler(request, reply, "results_published"),
   );
 
   /* ----- POST /exam-batches/:id/candidates — assign candidates -----
@@ -329,179 +367,222 @@ const examBatchRoutes: FastifyPluginAsync = async (app) => {
    * Parallelizes batch + candidate verification, then wraps the
    * duplicate-check + insert in a transaction to prevent race conditions.
    */
-  app.post("/:id/candidates", async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const parsed = assignCandidatesSchema.safeParse(request.body);
-    if (!parsed.success)
-      return reply.code(400).send({
-        error: "Validation failed",
-        details: parsed.error.flatten().fieldErrors,
+  app.post(
+    "/:id/candidates",
+    { preHandler: requireRole("super_admin", "exam_admin") },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const parsed = assignCandidatesSchema.safeParse(request.body);
+      if (!parsed.success)
+        return reply.code(400).send({
+          error: "Validation failed",
+          details: parsed.error.flatten().fieldErrors,
+        });
+
+      // Parallel: verify batch exists + verify candidates exist
+      const [batch, validCandidates] = await Promise.all([
+        db
+          .select({ id: examBatches.id })
+          .from(examBatches)
+          .where(eq(examBatches.id, id))
+          .limit(1),
+        db
+          .select({ id: candidates.id })
+          .from(candidates)
+          .where(inArray(candidates.id, parsed.data.candidateIds)),
+      ]);
+
+      if (!batch)
+        return reply.code(404).send({ error: "Exam batch not found" });
+
+      if (validCandidates.length !== parsed.data.candidateIds.length)
+        return reply
+          .code(400)
+          .send({ error: "Some candidate IDs are invalid" });
+
+      // Atomic insert with ON CONFLICT DO NOTHING — eliminates race conditions
+      // at the database level. No need for a transaction or check-then-insert.
+      const inserted = await db
+        .insert(examBatchCandidates)
+        .values(
+          parsed.data.candidateIds.map((candidateId) => ({
+            examBatchId: id,
+            candidateId,
+          })),
+        )
+        .onConflictDoNothing()
+        .returning({ candidateId: examBatchCandidates.candidateId });
+
+      const added = inserted.length;
+      const skipped = parsed.data.candidateIds.length - added;
+
+      return reply.code(201).send({
+        message: `${added} candidate(s) assigned`,
+        added,
+        skipped,
       });
-
-    // Parallel: verify batch exists + verify candidates exist
-    const [batch, validCandidates] = await Promise.all([
-      db
-        .select({ id: examBatches.id })
-        .from(examBatches)
-        .where(eq(examBatches.id, id))
-        .limit(1),
-      db
-        .select({ id: candidates.id })
-        .from(candidates)
-        .where(inArray(candidates.id, parsed.data.candidateIds)),
-    ]);
-
-    if (!batch) return reply.code(404).send({ error: "Exam batch not found" });
-
-    if (validCandidates.length !== parsed.data.candidateIds.length)
-      return reply.code(400).send({ error: "Some candidate IDs are invalid" });
-
-    // Atomic insert with ON CONFLICT DO NOTHING — eliminates race conditions
-    // at the database level. No need for a transaction or check-then-insert.
-    const inserted = await db
-      .insert(examBatchCandidates)
-      .values(
-        parsed.data.candidateIds.map((candidateId) => ({
-          examBatchId: id,
-          candidateId,
-        })),
-      )
-      .onConflictDoNothing()
-      .returning({ candidateId: examBatchCandidates.candidateId });
-
-    const added = inserted.length;
-    const skipped = parsed.data.candidateIds.length - added;
-
-    return reply.code(201).send({
-      message: `${added} candidate(s) assigned`,
-      added,
-      skipped,
-    });
-  });
+    },
+  );
 
   /* ----- GET /exam-batches/:id/candidates — list candidates in batch ----- */
-  app.get("/:id/candidates", async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const query = request.query as { page?: string; pageSize?: string };
-    const page = Math.max(1, parseInt(query.page ?? "1"));
-    const pageSize = Math.min(100, Math.max(1, parseInt(query.pageSize ?? "50")));
-    const offset = (page - 1) * pageSize;
+  app.get(
+    "/:id/candidates",
+    { preHandler: requireRole("super_admin", "exam_admin", "proctor") },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const query = request.query as { page?: string; pageSize?: string };
+      const page = Math.max(1, parseInt(query.page ?? "1"));
+      const pageSize = Math.min(
+        100,
+        Math.max(1, parseInt(query.pageSize ?? "50")),
+      );
+      const offset = (page - 1) * pageSize;
 
-    const [rows, countResult] = await Promise.all([
-      db
-        .select({
-          id: examBatchCandidates.id,
-          candidateId: examBatchCandidates.candidateId,
-          assignedAt: examBatchCandidates.assignedAt,
-          rollNumber: candidates.rollNumber,
-          admitCardNumber: candidates.admitCardNumber,
-          userId: candidates.userId,
-          isActive: candidates.isActive,
-        })
-        .from(examBatchCandidates)
-        .innerJoin(candidates, eq(examBatchCandidates.candidateId, candidates.id))
-        .where(eq(examBatchCandidates.examBatchId, id))
-        .orderBy(asc(examBatchCandidates.assignedAt))
-        .limit(pageSize)
-        .offset(offset),
-      db
-        .select({ count: sql<number>`COUNT(*)::int` })
-        .from(examBatchCandidates)
-        .where(eq(examBatchCandidates.examBatchId, id)),
-    ]);
+      const [rows, countResult] = await Promise.all([
+        db
+          .select({
+            id: examBatchCandidates.id,
+            candidateId: examBatchCandidates.candidateId,
+            assignedAt: examBatchCandidates.assignedAt,
+            rollNumber: candidates.rollNumber,
+            admitCardNumber: candidates.admitCardNumber,
+            userId: candidates.userId,
+            isActive: candidates.isActive,
+          })
+          .from(examBatchCandidates)
+          .innerJoin(
+            candidates,
+            eq(examBatchCandidates.candidateId, candidates.id),
+          )
+          .where(eq(examBatchCandidates.examBatchId, id))
+          .orderBy(asc(examBatchCandidates.assignedAt))
+          .limit(pageSize)
+          .offset(offset),
+        db
+          .select({ count: sql<number>`COUNT(*)::int` })
+          .from(examBatchCandidates)
+          .where(eq(examBatchCandidates.examBatchId, id)),
+      ]);
 
-    return reply.send({ data: rows, total: countResult[0]?.count ?? 0, page, pageSize });
-  });
+      return reply.send({
+        data: rows,
+        total: countResult[0]?.count ?? 0,
+        page,
+        pageSize,
+      });
+    },
+  );
 
   /* ----- GET /exam-batches/:id/attempts — list attempts in batch ----- */
-  app.get("/:id/attempts", async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const query = request.query as { page?: string; pageSize?: string; status?: string };
-    const page = Math.max(1, parseInt(query.page ?? "1"));
-    const pageSize = Math.min(100, Math.max(1, parseInt(query.pageSize ?? "50")));
-    const offset = (page - 1) * pageSize;
+  app.get(
+    "/:id/attempts",
+    { preHandler: requireRole("super_admin", "exam_admin", "proctor") },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const query = request.query as {
+        page?: string;
+        pageSize?: string;
+        status?: string;
+      };
+      const page = Math.max(1, parseInt(query.page ?? "1"));
+      const pageSize = Math.min(
+        100,
+        Math.max(1, parseInt(query.pageSize ?? "50")),
+      );
+      const offset = (page - 1) * pageSize;
 
-    const conditions = [eq(attempts.examBatchId, id)];
-    if (query.status) {
-      conditions.push(eq(attempts.status, query.status as never));
-    }
-    const where = and(...conditions);
+      const conditions = [eq(attempts.examBatchId, id)];
+      if (query.status) {
+        conditions.push(eq(attempts.status, query.status as never));
+      }
+      const where = and(...conditions);
 
-    const [rows, countResult] = await Promise.all([
-      db
-        .select({
-          id: attempts.id,
-          candidateId: attempts.candidateId,
-          deviceId: attempts.deviceId,
-          status: attempts.status,
-          startedAt: attempts.startedAt,
-          submittedAt: attempts.submittedAt,
-          remainingTimeSecs: attempts.remainingTimeSecs,
-          isReconnected: attempts.isReconnected,
-          reconnectedCount: attempts.reconnectedCount,
-        })
-        .from(attempts)
-        .where(where)
-        .orderBy(asc(attempts.createdAt))
-        .limit(pageSize)
-        .offset(offset),
-      db
-        .select({ count: sql<number>`COUNT(*)::int` })
-        .from(attempts)
-        .where(where),
-    ]);
+      const [rows, countResult] = await Promise.all([
+        db
+          .select({
+            id: attempts.id,
+            candidateId: attempts.candidateId,
+            deviceId: attempts.deviceId,
+            status: attempts.status,
+            startedAt: attempts.startedAt,
+            submittedAt: attempts.submittedAt,
+            remainingTimeSecs: attempts.remainingTimeSecs,
+            isReconnected: attempts.isReconnected,
+            reconnectedCount: attempts.reconnectedCount,
+          })
+          .from(attempts)
+          .where(where)
+          .orderBy(asc(attempts.createdAt))
+          .limit(pageSize)
+          .offset(offset),
+        db
+          .select({ count: sql<number>`COUNT(*)::int` })
+          .from(attempts)
+          .where(where),
+      ]);
 
-    return reply.send({ data: rows, total: countResult[0]?.count ?? 0, page, pageSize });
-  });
+      return reply.send({
+        data: rows,
+        total: countResult[0]?.count ?? 0,
+        page,
+        pageSize,
+      });
+    },
+  );
 
   /* ----- GET /exam-batches/:id/monitor — monitoring snapshot -----
    *
    * All three queries run in parallel — if the batch doesn't exist,
    * the counts return 0 and we return 404.
    */
-  app.get("/:id/monitor", async (request, reply) => {
-    const { id } = request.params as { id: string };
+  app.get(
+    "/:id/monitor",
+    { preHandler: requireRole("super_admin", "exam_admin", "proctor") },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
 
-    const [batch, candidateCount, statusCounts] = await Promise.all([
-      db
-        .select({
-          id: examBatches.id,
-          name: examBatches.name,
-          status: examBatches.status,
-          examId: examBatches.examId,
-          actualStartAt: examBatches.actualStartAt,
-          actualEndAt: examBatches.actualEndAt,
-        })
-        .from(examBatches)
-        .where(eq(examBatches.id, id))
-        .limit(1),
-      db
-        .select({ count: sql<number>`COUNT(*)::int` })
-        .from(examBatchCandidates)
-        .where(eq(examBatchCandidates.examBatchId, id)),
-      db
-        .select({
-          status: attempts.status,
-          count: sql<number>`COUNT(*)::int`,
-        })
-        .from(attempts)
-        .where(eq(attempts.examBatchId, id))
-        .groupBy(attempts.status),
-    ]);
+      const [batch, candidateCount, statusCounts] = await Promise.all([
+        db
+          .select({
+            id: examBatches.id,
+            name: examBatches.name,
+            status: examBatches.status,
+            examId: examBatches.examId,
+            actualStartAt: examBatches.actualStartAt,
+            actualEndAt: examBatches.actualEndAt,
+          })
+          .from(examBatches)
+          .where(eq(examBatches.id, id))
+          .limit(1),
+        db
+          .select({ count: sql<number>`COUNT(*)::int` })
+          .from(examBatchCandidates)
+          .where(eq(examBatchCandidates.examBatchId, id)),
+        db
+          .select({
+            status: attempts.status,
+            count: sql<number>`COUNT(*)::int`,
+          })
+          .from(attempts)
+          .where(eq(attempts.examBatchId, id))
+          .groupBy(attempts.status),
+      ]);
 
-    if (!batch) return reply.code(404).send({ error: "Exam batch not found" });
+      if (!batch)
+        return reply.code(404).send({ error: "Exam batch not found" });
 
-    const statusBreakdown: Record<string, number> = {};
-    for (const s of statusCounts) {
-      statusBreakdown[s.status] = s.count;
-    }
+      const statusBreakdown: Record<string, number> = {};
+      for (const s of statusCounts) {
+        statusBreakdown[s.status] = s.count;
+      }
 
-    return reply.send({
-      ...batch,
-      totalCandidates: candidateCount[0]?.count ?? 0,
-      attemptStatusBreakdown: statusBreakdown,
-    });
-  });
+      return reply.send({
+        ...batch,
+        totalCandidates: candidateCount[0]?.count ?? 0,
+        attemptStatusBreakdown: statusBreakdown,
+      });
+    },
+  );
 };
 
 export default examBatchRoutes;

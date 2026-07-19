@@ -3,6 +3,7 @@ import { type FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { db } from "../../database/db.js";
 import { users } from "../../database/schemas/index.js";
+import { requireRole } from "../../middleware/rbac.js";
 import { hashPassword } from "../../services/auth.js";
 
 const createUserSchema = z.object({
@@ -42,6 +43,8 @@ const listQuerySchema = z.object({
 });
 
 const usersRoutes: FastifyPluginAsync = async (app) => {
+  app.addHook("preHandler", requireRole("super_admin"));
+
   app.get("/", async (request) => {
     const parsed = listQuerySchema.safeParse(request.query);
     if (!parsed.success) {

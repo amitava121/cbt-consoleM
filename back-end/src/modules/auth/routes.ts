@@ -4,11 +4,13 @@ import { z } from "zod";
 import { db } from "../../database/db.js";
 import {
   deviceRegistrations,
+  institutions,
   sessionTokens,
   users,
 } from "../../database/schemas/index.js";
 import {
   generateTokenPair,
+  hashPassword,
   verifyPassword,
   verifyToken,
   type TokenPayload,
@@ -84,7 +86,8 @@ const authRoutes: FastifyPluginAsync = async (app) => {
       const refreshJti = verifyToken(tokens.refreshToken).jti;
 
       await db.transaction(async (tx) => {
-        const deviceUuid = (body as { _deviceUuid?: string })._deviceUuid ?? null;
+        const deviceUuid =
+          (body as { _deviceUuid?: string })._deviceUuid ?? null;
         await tx.insert(sessionTokens).values([
           {
             userId: user.id,
@@ -110,7 +113,7 @@ const authRoutes: FastifyPluginAsync = async (app) => {
 
       // Response format per API_SPECIFICATION.md Section 3.1
       const expiresInSeconds = Math.floor(
-        (tokens.accessExpiresAt.getTime() - Date.now()) / 1000
+        (tokens.accessExpiresAt.getTime() - Date.now()) / 1000,
       );
 
       return {
@@ -201,7 +204,7 @@ const authRoutes: FastifyPluginAsync = async (app) => {
 
     // Response format per API_SPECIFICATION.md Section 3.2
     const expiresInSeconds = Math.floor(
-      (tokens.accessExpiresAt.getTime() - Date.now()) / 1000
+      (tokens.accessExpiresAt.getTime() - Date.now()) / 1000,
     );
 
     return {
@@ -235,6 +238,159 @@ const authRoutes: FastifyPluginAsync = async (app) => {
 
     return { message: "Logged out" };
   });
+
+  // ─── POST /auth/change-password ───────────────────────────────
+  app.post("/change-password", async (request, reply) => {
+    const authHeader = request.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ")) {
+      return reply.code(401).send({ error: "Missing access token" });
+    }
+
+    let payload: TokenPayload;
+    try {
+      payload = verifyToken(authHeader.slice(7));
+    } catch {
+      return reply.code(401).send({ error: "Invalid access token" });
+    }
+
+    const changePasswordSchema = z.object({
+      currentPassword: z.string().min(1),
+      newPassword: z.string().min(8).max(100),
+    });
+
+    const parsed = changePasswordSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "Invalid request body" });
+    }
+
+    const { currentPassword, newPassword } = parsed.data;
+
+    const [user] = await db
+      .select({ id: users.id, passwordHash: users.passwordHash })
+      .from(users)
+      .where(eq(users.id, payload.sub))
+      .limit(1);
+
+    if (!user) {
+      return reply.code(404).send({ error: "User not found" });
+    }
+
+    const isValid = await verifyPassword(currentPassword, user.passwordHash);
+    if (!isValid) {
+      return reply.code(401).send({ error: "Current password is incorrect" });
+    }
+
+    const newHash = await hashPassword(newPassword);
+    await db
+      .update(users)
+      .set({ passwordHash: newHash, updatedAt: new Date() })
+      .where(eq(users.id, user.id));
+
+    return { message: "Password changed successfully" };
+  });
+
+  // ─── GET /auth/me ─────────────────────────────────────────────
+  app.get("/me", async (request, reply) => {
+    const authHeader = request.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ")) {
+      return reply.code(401).send({ error: "Missing access token" });
+    }
+
+    let payload: TokenPayload;
+    try {
+      payload = verifyToken(authHeader.slice(7));
+    } catch {
+      return reply.code(401).send({ error: "Invalid access token" });
+    }
+
+    const [user] = await db
+      .select({
+        id: users.id,
+        email: users.email,
+        fullName: users.fullName,
+        role: users.role,
+        phone: users.phone,
+        isActive: users.isActive,
+        institutionId: users.institutionId,
+      })
+      .from(users)
+      .where(eq(users.id, payload.sub))
+      .limit(1);
+
+    if (!user) {
+      return reply.code(404).send({ error: "User not found" });
+    }
+
+    let institution: { id: string; name: string } | null = null;
+    if (user.institutionId) {
+      const [inst] = await db
+        .select({ id: institutions.id, name: institutions.name })
+        .from(institutions)
+        .where(eq(institutions.id, user.institutionId))
+        .limit(1);
+      if (inst) institution = inst;
+    }
+
+    const permissions = getRolePermissions(user.role);
+
+    return {
+      id: user.id,
+      email: user.email,
+      fullName: user.fullName,
+      role: user.role,
+      phone: user.phone,
+      isActive: user.isActive,
+      institution,
+      permissions,
+    };
+  });
 };
+
+const ROLE_PERMISSIONS: Record<string, string[]> = {
+  super_admin: ["*"],
+  exam_admin: [
+    "users:read",
+    "institutions:read",
+    "centers:read",
+    "batches:read",
+    "subjects:read",
+    "topics:read",
+    "question-banks:read",
+    "questions:read",
+    "exams:read",
+    "exams:write",
+    "exam-batches:read",
+    "exam-batches:write",
+    "candidates:read",
+    "candidates:write",
+    "devices:read",
+    "sessions:read",
+    "sessions:write",
+  ],
+  proctor: [
+    "exam-batches:read",
+    "sessions:read",
+    "sessions:write",
+    "candidates:read",
+    "devices:read",
+  ],
+  question_author: [
+    "question-banks:read",
+    "question-banks:write",
+    "questions:read",
+    "questions:write",
+    "subjects:read",
+    "topics:read",
+  ],
+  candidate: [
+    "candidate:exams:read",
+    "candidate:answers:write",
+    "candidate:submit",
+  ],
+};
+
+function getRolePermissions(role: string): string[] {
+  return ROLE_PERMISSIONS[role] ?? [];
+}
 
 export default authRoutes;

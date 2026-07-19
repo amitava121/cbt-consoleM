@@ -8,6 +8,7 @@ import {
     exams,
     questions,
 } from "../../database/schemas/index.js";
+import { requireRole } from "../../middleware/rbac.js";
 
 /* ---------- Schemas ---------- */
 
@@ -81,6 +82,8 @@ const updateExamQuestionSchema = z.object({
 /* ---------- Route Plugin ---------- */
 
 const examRoutes: FastifyPluginAsync = async (app) => {
+  app.addHook("preHandler", requireRole("super_admin", "exam_admin"));
+
   /* ----- GET /exams — list with pagination ----- */
   app.get("/", async (request, reply) => {
     const query = request.query as {
