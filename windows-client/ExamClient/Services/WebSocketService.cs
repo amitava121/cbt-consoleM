@@ -39,6 +39,7 @@ public sealed class WebSocketService : IWebSocketService, IDisposable
     public event EventHandler<SessionResumePayload>? SessionResumed;
     public event EventHandler<SessionWarningPayload>? WarningReceived;
     public event EventHandler<ExamSubmittedPayload>? ExamSubmitted;
+    public event EventHandler<SessionAutoSubmittedPayload>? SessionAutoSubmitted;
     public event EventHandler<TimeSyncPayload>? TimeSynced;
     public event EventHandler<SyncDeltaResponsePayload>? DeltaSyncReceived;
     public event EventHandler? Disconnected;
@@ -301,6 +302,11 @@ public sealed class WebSocketService : IWebSocketService, IDisposable
                 case "exam:submitted":
                     var submitPayload = Deserialize<ExamSubmittedPayload>(message.Data);
                     if (submitPayload is not null) ExamSubmitted?.Invoke(this, submitPayload);
+                    break;
+
+                case "session:auto_submitted":
+                    var autoSubmitPayload = Deserialize<SessionAutoSubmittedPayload>(message.Data);
+                    if (autoSubmitPayload is not null) SessionAutoSubmitted?.Invoke(this, autoSubmitPayload);
                     break;
 
                 case "session:time_sync":

@@ -237,6 +237,21 @@ public sealed class ExamSubmittedPayload
     public string SubmittedAt { get; set; } = string.Empty;
 }
 
+public sealed class SessionAutoSubmittedPayload
+{
+    [JsonPropertyName("attemptId")]
+    public string AttemptId { get; set; } = string.Empty;
+
+    [JsonPropertyName("candidateId")]
+    public string CandidateId { get; set; } = string.Empty;
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = string.Empty;
+
+    [JsonPropertyName("serverTime")]
+    public long ServerTime { get; set; }
+}
+
 public sealed class TimeSyncPayload
 {
     [JsonPropertyName("serverTime")]

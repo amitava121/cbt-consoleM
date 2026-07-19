@@ -64,15 +64,17 @@ export class RoomManager {
 
   /**
    * Send to a single socket with backpressure check.
+   * Accepts pre-serialized string or object (will be serialized).
    */
-  sendTo(socket: WebSocket, payload: unknown): boolean {
+  sendTo(socket: WebSocket, payload: unknown | string): boolean {
     if (socket.readyState !== 1) return false;
     if (socket.bufferedAmount > MAX_BUFFERED_AMOUNT) {
       socket.terminate();
       this.leave(socket);
       return false;
     }
-    socket.send(JSON.stringify(payload));
+    const message = typeof payload === "string" ? payload : JSON.stringify(payload);
+    socket.send(message);
     return true;
   }
 

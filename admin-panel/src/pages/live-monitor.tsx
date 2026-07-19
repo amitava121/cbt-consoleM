@@ -8,8 +8,9 @@ import {
     Terminal,
     Timer,
     Wifi,
+    Zap,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -65,6 +66,7 @@ export default function LiveMonitorPage() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [lastRefresh, setLastRefresh] = useState<number>(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const prevAttemptsRef = useRef<Map<string, string>>(new Map());
 
   // Load exam batches on mount
   useEffect(() => {
@@ -90,7 +92,37 @@ export default function LiveMonitorPage() {
     setLoading(true);
     try {
       const res = await sessionService.getActiveSessions(selectedBatchId);
-      setAttempts(res.attempts);
+      const newAttempts = res.attempts;
+
+      // Detect status changes and fire toast notifications
+      for (const attempt of newAttempts) {
+        const prevStatus = prevAttemptsRef.current.get(attempt.id);
+        if (prevStatus && prevStatus !== attempt.status) {
+          if (attempt.status === "auto_submitted") {
+            toast.warning(
+              `Attempt ${attempt.id.slice(0, 8)}... was auto-submitted (timer expired)`,
+              { icon: <Zap className="h-4 w-4" />, duration: 8000 },
+            );
+          } else if (
+            attempt.status === "submitted" ||
+            attempt.status === "force_submitted"
+          ) {
+            toast.success(`Attempt ${attempt.id.slice(0, 8)}... was submitted`);
+          } else if (attempt.status === "terminated") {
+            toast.error(`Attempt ${attempt.id.slice(0, 8)}... was terminated`);
+          } else if (attempt.status === "paused") {
+            toast.info(`Attempt ${attempt.id.slice(0, 8)}... was paused`);
+          } else if (
+            attempt.status === "in_progress" &&
+            prevStatus === "paused"
+          ) {
+            toast.info(`Attempt ${attempt.id.slice(0, 8)}... was resumed`);
+          }
+        }
+        prevAttemptsRef.current.set(attempt.id, attempt.status);
+      }
+
+      setAttempts(newAttempts);
       setLastRefresh(Date.now());
     } catch {
       toast.error("Failed to fetch active sessions");
@@ -144,14 +176,22 @@ export default function LiveMonitorPage() {
     }
   };
 
-  const inProgressCount = attempts.filter(
-    (a) => a.status === "in_progress",
-  ).length;
-  const pausedCount = attempts.filter((a) => a.status === "paused").length;
-  const notStartedCount = attempts.filter(
-    (a) => a.status === "not_started",
-  ).length;
-  const reconnectedCount = attempts.filter((a) => a.isReconnected).length;
+  const inProgressCount = useMemo(
+    () => attempts.filter((a) => a.status === "in_progress").length,
+    [attempts],
+  );
+  const pausedCount = useMemo(
+    () => attempts.filter((a) => a.status === "paused").length,
+    [attempts],
+  );
+  const notStartedCount = useMemo(
+    () => attempts.filter((a) => a.status === "not_started").length,
+    [attempts],
+  );
+  const autoSubmittedCount = useMemo(
+    () => attempts.filter((a) => a.status === "auto_submitted").length,
+    [attempts],
+  );
 
   return (
     <div className="space-y-6">
@@ -251,13 +291,13 @@ export default function LiveMonitorPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Reconnected
+              Auto-Submitted
             </CardTitle>
-            <Wifi className="h-4 w-4 text-purple-500" />
+            <Zap className="h-4 w-4 text-orange-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-purple-600">
-              {reconnectedCount}
+            <div className="text-2xl font-bold text-orange-600">
+              {autoSubmittedCount}
             </div>
           </CardContent>
         </Card>

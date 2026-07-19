@@ -38,7 +38,7 @@ const listQuerySchema = z.object({
 });
 
 const subjectsRoutes: FastifyPluginAsync = async (app) => {
-  app.get("/", async (request) => {
+  app.get("/", async (request, reply) => {
     const parsed = listQuerySchema.safeParse(request.query);
     if (!parsed.success) return { error: "Invalid query parameters" };
     const { page, pageSize, search } = parsed.data;
@@ -63,6 +63,9 @@ const subjectsRoutes: FastifyPluginAsync = async (app) => {
       where ? baseQuery.where(where) : baseQuery,
       where ? countQuery.where(where) : countQuery,
     ]);
+
+    // Subjects change infrequently — cache for 60s
+    reply.header("Cache-Control", "private, max-age=60, stale-while-revalidate=120");
 
     return { data: rows, total: count, page, pageSize };
   });
@@ -106,14 +109,31 @@ const subjectsRoutes: FastifyPluginAsync = async (app) => {
     return updated;
   });
 
-  app.get("/:id/topics", async (request) => {
+  app.get("/:id/topics", async (request, reply) => {
     const id = (request.params as { id: string }).id;
-    const rows = await db
-      .select()
-      .from(topics)
-      .where(eq(topics.subjectId, id))
-      .orderBy(desc(topics.createdAt));
-    return { data: rows, total: rows.length };
+    const query = request.query as { page?: string; pageSize?: string };
+    const page = Math.max(1, parseInt(query.page ?? "1"));
+    const pageSize = Math.min(100, Math.max(1, parseInt(query.pageSize ?? "50")));
+    const offset = (page - 1) * pageSize;
+
+    const [rows, [{ count }]] = await Promise.all([
+      db
+        .select()
+        .from(topics)
+        .where(eq(topics.subjectId, id))
+        .orderBy(desc(topics.createdAt))
+        .limit(pageSize)
+        .offset(offset),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(topics)
+        .where(eq(topics.subjectId, id)),
+    ]);
+
+    // Topics change infrequently
+    reply.header("Cache-Control", "private, max-age=60, stale-while-revalidate=120");
+
+    return { data: rows, total: count, page, pageSize };
   });
 };
 

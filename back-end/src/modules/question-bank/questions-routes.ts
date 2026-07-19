@@ -271,66 +271,59 @@ const questionsRoutes: FastifyPluginAsync = async (app) => {
       updateData.mediaUrlsJson = mediaUrls.length > 0 ? mediaUrls : null;
     if (solution !== undefined) updateData.solutionJson = solution ?? null;
 
-    const [updated] = await db
-      .update(questions)
-      .set(updateData)
-      .where(eq(questions.id, id))
-      .returning();
+    // Use a transaction to atomically update question + replace children
+    const updated = await db.transaction(async (tx) => {
+      const [updatedRow] = await tx
+        .update(questions)
+        .set(updateData)
+        .where(eq(questions.id, id))
+        .returning();
 
-    const sideEffects: Promise<unknown>[] = [];
+      const ops: Promise<unknown>[] = [];
 
-    if (optsData && optsData.length > 0) {
-      sideEffects.push(
-        db.delete(questionOptions).where(eq(questionOptions.questionId, id)),
-      );
-    }
+      // Replace options atomically (delete + insert in same transaction)
+      if (optsData && optsData.length > 0) {
+        ops.push(
+          tx.delete(questionOptions).where(eq(questionOptions.questionId, id)).then(async () => {
+            await tx.insert(questionOptions).values(
+              optsData.map((o) => ({
+                questionId: id,
+                optionText: o.text,
+                isCorrect: o.isCorrect,
+                displayOrder: o.displayOrder,
+              })),
+            );
+          }),
+        );
+      }
 
-    if (tagData !== undefined) {
-      sideEffects.push(
-        db.delete(questionTags).where(eq(questionTags.questionId, id)),
-      );
-    }
+      // Replace tags atomically
+      if (tagData !== undefined) {
+        ops.push(
+          tx.delete(questionTags).where(eq(questionTags.questionId, id)).then(async () => {
+            if (tagData.length > 0) {
+              await tx.insert(questionTags).values(tagData.map((tag) => ({ questionId: id, tag })));
+            }
+          }),
+        );
+      }
 
-    if (content) {
-      sideEffects.push(
-        db.insert(questionVersions).values({
-          questionId: id,
-          versionNumber: existing.version + 1,
-          contentJson: content,
-          changedBy: request.user.sub,
-          changeReason: "Updated via admin panel",
-        }),
-      );
-    }
-
-    await Promise.all(sideEffects);
-
-    const insertAfterDelete: Promise<unknown>[] = [];
-
-    if (optsData && optsData.length > 0) {
-      insertAfterDelete.push(
-        db.insert(questionOptions).values(
-          optsData.map((o) => ({
+      // Insert version record
+      if (content) {
+        ops.push(
+          tx.insert(questionVersions).values({
             questionId: id,
-            optionText: o.text,
-            isCorrect: o.isCorrect,
-            displayOrder: o.displayOrder,
-          })),
-        ),
-      );
-    }
+            versionNumber: existing.version + 1,
+            contentJson: content,
+            changedBy: request.user.sub,
+            changeReason: "Updated via admin panel",
+          }),
+        );
+      }
 
-    if (tagData !== undefined && tagData.length > 0) {
-      insertAfterDelete.push(
-        db
-          .insert(questionTags)
-          .values(tagData.map((tag) => ({ questionId: id, tag }))),
-      );
-    }
-
-    if (insertAfterDelete.length > 0) {
-      await Promise.all(insertAfterDelete);
-    }
+      await Promise.all(ops);
+      return updatedRow;
+    });
 
     return updated;
   });

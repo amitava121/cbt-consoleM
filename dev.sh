@@ -84,7 +84,7 @@ else
     err "  docker run -d --name cbe-console-postgres \\"
     err "    -e POSTGRES_PASSWORD=postgres \\"
     err "    -e POSTGRES_DB=cbe-cm \\"
-    err "    -p 5432:5432 postgres:17"
+    err "    -p 5433:5432 postgres:17"
     exit 1
   fi
   log "Waiting for PostgreSQL to accept connections..."
@@ -139,7 +139,7 @@ echo -e "${CYAN}  CBE Console is running!${NC}"
 echo -e "${CYAN}  Backend:    http://localhost:3000${NC}"
 echo -e "${CYAN}  API Docs:   http://localhost:3000/docs${NC}"
 echo -e "${CYAN}  Frontend:   http://localhost:5173${NC}"
-echo -e "${CYAN}  PostgreSQL: localhost:5432 (cbe-cm)${NC}"
+echo -e "${CYAN}  PostgreSQL: localhost:5433 (cbe-cm)${NC}"
 echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
 echo ""
 log "Press Ctrl+C to stop all services."

@@ -1,3 +1,4 @@
+import compress from "@fastify/compress";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import multipart from "@fastify/multipart";
@@ -6,7 +7,7 @@ import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import Fastify from "fastify";
 import { env } from "./config/env.js";
-import { closePool } from "./database/db.js";
+import { closePool, getPoolStats } from "./database/db.js";
 import authRoutes from "./modules/auth/routes.js";
 import examBatchRoutes from "./modules/exams/exam-batch-routes.js";
 import examRoutes from "./modules/exams/exam-routes.js";
@@ -54,6 +55,11 @@ app.register(cors, {
   origin: env.NODE_ENV === "development" ? true : false,
 });
 app.register(helmet);
+app.register(compress, {
+  global: true,
+  encodings: ["gzip", "deflate"],
+  threshold: 1024, // Only compress responses > 1KB
+});
 app.register(rateLimit, { max: 100, timeWindow: "1 minute" });
 app.register(multipart, {
   limits: { fileSize: 10 * 1024 * 1024 },
@@ -89,7 +95,7 @@ if (env.NODE_ENV === "development") {
   await app.register(swaggerUi, { routePrefix: "/docs" });
 }
 
-app.get("/health", async () => ({ status: "ok", env: env.NODE_ENV }));
+app.get("/health", async () => ({ status: "ok", env: env.NODE_ENV, pool: getPoolStats() }));
 
 app.get("/api", async () => ({
   message: "CBE Console API",

@@ -242,12 +242,26 @@ const centersRoutes: FastifyPluginAsync = async (app) => {
 
   app.get("/:id/batches", async (request) => {
     const id = (request.params as { id: string }).id;
-    const rows = await db
-      .select()
-      .from(batches)
-      .where(eq(batches.centerId, id))
-      .orderBy(desc(batches.createdAt));
-    return { data: rows, total: rows.length };
+    const query = request.query as { page?: string; pageSize?: string };
+    const page = Math.max(1, parseInt(query.page ?? "1"));
+    const pageSize = Math.min(100, Math.max(1, parseInt(query.pageSize ?? "50")));
+    const offset = (page - 1) * pageSize;
+
+    const [rows, [{ count }]] = await Promise.all([
+      db
+        .select()
+        .from(batches)
+        .where(eq(batches.centerId, id))
+        .orderBy(desc(batches.createdAt))
+        .limit(pageSize)
+        .offset(offset),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(batches)
+        .where(eq(batches.centerId, id)),
+    ]);
+
+    return { data: rows, total: count, page, pageSize };
   });
 };
 

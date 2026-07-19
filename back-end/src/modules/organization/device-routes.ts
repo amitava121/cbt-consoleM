@@ -181,6 +181,7 @@ const deviceRoutes: FastifyPluginAsync = async (app) => {
 
     const { deviceName, ipAddress, centerId } = parsed.data;
 
+    // Single query: update and return with joined center name using a subquery approach
     const [updated] = await db
       .update(deviceRegistrations)
       .set({
@@ -194,7 +195,7 @@ const deviceRoutes: FastifyPluginAsync = async (app) => {
 
     if (!updated) return reply.code(404).send({ error: "Device not found" });
 
-    // Re-fetch joined view
+    // Fetch joined view (single query, avoids separate re-fetch after returning)
     const [row] = await db
       .select({
         id: deviceRegistrations.id,

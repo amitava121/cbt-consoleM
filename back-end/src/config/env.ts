@@ -6,7 +6,7 @@ export const env = {
   HOST: process.env.HOST || "0.0.0.0",
   DATABASE_URL:
     process.env.DATABASE_URL ||
-    "postgresql://postgres:postgres@localhost:5432/cbe_console",
+    "postgresql://postgres:postgres@localhost:5433/cbe-cm",
   JWT_SECRET:
     process.env.JWT_SECRET || "change-me-in-production-min-32-characters",
   JWT_ACCESS_EXPIRY: process.env.JWT_ACCESS_EXPIRY || "15m",

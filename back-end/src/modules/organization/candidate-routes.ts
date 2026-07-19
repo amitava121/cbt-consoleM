@@ -241,7 +241,8 @@ const candidateRoutes: FastifyPluginAsync = async (app) => {
       isActive,
     } = parsed.data;
 
-    const result = await db.transaction(async (tx) => {
+    // Single transaction: update candidate + user, then return joined result
+    const row = await db.transaction(async (tx) => {
       // Update candidate
       const [updated] = await tx
         .update(candidates)
@@ -270,33 +271,33 @@ const candidateRoutes: FastifyPluginAsync = async (app) => {
           .where(eq(users.id, updated.userId));
       }
 
-      return updated;
+      // Fetch joined view within same transaction (avoids separate query)
+      const [result] = await tx
+        .select({
+          id: candidates.id,
+          userId: candidates.userId,
+          batchId: candidates.batchId,
+          rollNumber: candidates.rollNumber,
+          admitCardNumber: candidates.admitCardNumber,
+          photoUrl: candidates.photoUrl,
+          isActive: candidates.isActive,
+          createdAt: candidates.createdAt,
+          updatedAt: candidates.updatedAt,
+          email: users.email,
+          fullName: users.fullName,
+          phone: users.phone,
+          batchName: batches.name,
+        })
+        .from(candidates)
+        .innerJoin(users, eq(candidates.userId, users.id))
+        .leftJoin(batches, eq(candidates.batchId, batches.id))
+        .where(eq(candidates.id, id))
+        .limit(1);
+
+      return result;
     });
 
-    if (!result) return reply.code(404).send({ error: "Candidate not found" });
-
-    // Re-fetch joined view for complete response
-    const [row] = await db
-      .select({
-        id: candidates.id,
-        userId: candidates.userId,
-        batchId: candidates.batchId,
-        rollNumber: candidates.rollNumber,
-        admitCardNumber: candidates.admitCardNumber,
-        photoUrl: candidates.photoUrl,
-        isActive: candidates.isActive,
-        createdAt: candidates.createdAt,
-        updatedAt: candidates.updatedAt,
-        email: users.email,
-        fullName: users.fullName,
-        phone: users.phone,
-        batchName: batches.name,
-      })
-      .from(candidates)
-      .innerJoin(users, eq(candidates.userId, users.id))
-      .leftJoin(batches, eq(candidates.batchId, batches.id))
-      .where(eq(candidates.id, id))
-      .limit(1);
+    if (!row) return reply.code(404).send({ error: "Candidate not found" });
 
     return reply.send(row);
   });

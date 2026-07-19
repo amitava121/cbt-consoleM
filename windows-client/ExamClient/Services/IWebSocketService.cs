@@ -96,6 +96,9 @@ public interface IWebSocketService
     /// <summary>Raised when exam submission is confirmed.</summary>
     event EventHandler<ExamSubmittedPayload>? ExamSubmitted;
 
+    /// <summary>Raised when server auto-submits the exam (timer expired).</summary>
+    event EventHandler<SessionAutoSubmittedPayload>? SessionAutoSubmitted;
+
     /// <summary>Raised when server sends time sync correction.</summary>
     event EventHandler<TimeSyncPayload>? TimeSynced;
 

@@ -372,6 +372,7 @@ const sessionRoutes: FastifyPluginAsync = async (app) => {
 
   // ─── GET /sessions/:attemptId/exam-paper ──────────────────────
   // Returns the full exam paper for the attempt (questions + options)
+  // Optimized: parallel queries and response caching header
   app.get("/:attemptId/exam-paper", async (request, reply) => {
     const { attemptId } = request.params as { attemptId: string };
 
@@ -394,39 +395,39 @@ const sessionRoutes: FastifyPluginAsync = async (app) => {
 
     const { examId, examData } = attemptData[0];
 
-    // Parallel: sections + exam questions (with question details)
-    const sections = await db
-      .select()
-      .from(examSections)
-      .where(eq(examSections.examId, examId))
-      .orderBy(examSections.sectionOrder);
+    // Parallel: fetch sections and all exam questions in one pass
+    const [sections, examQs] = await Promise.all([
+      db
+        .select()
+        .from(examSections)
+        .where(eq(examSections.examId, examId))
+        .orderBy(examSections.sectionOrder),
+      db
+        .select({
+          eqId: examQuestions.id,
+          examSectionId: examQuestions.examSectionId,
+          questionId: examQuestions.questionId,
+          displayOrder: examQuestions.displayOrder,
+          marks: examQuestions.marks,
+          negativeMarks: examQuestions.negativeMarks,
+          isOptional: examQuestions.isOptional,
+          qId: questions.id,
+          qType: questions.type,
+          qText: questions.contentJson,
+          qMediaUrl: questions.mediaUrlsJson,
+        })
+        .from(examQuestions)
+        .innerJoin(questions, eq(examQuestions.questionId, questions.id))
+        .innerJoin(examSections, eq(examQuestions.examSectionId, examSections.id))
+        .where(eq(examSections.examId, examId))
+        .orderBy(examQuestions.displayOrder),
+    ]);
 
     if (sections.length === 0) {
       return reply.send({ exam: examData, sections: [], questions: [] });
     }
 
-    const sectionIds = sections.map((s) => s.id);
-
-    const examQs = await db
-      .select({
-        eqId: examQuestions.id,
-        examSectionId: examQuestions.examSectionId,
-        questionId: examQuestions.questionId,
-        displayOrder: examQuestions.displayOrder,
-        marks: examQuestions.marks,
-        negativeMarks: examQuestions.negativeMarks,
-        isOptional: examQuestions.isOptional,
-        qId: questions.id,
-        qType: questions.type,
-        qText: questions.contentJson,
-        qMediaUrl: questions.mediaUrlsJson,
-      })
-      .from(examQuestions)
-      .innerJoin(questions, eq(examQuestions.questionId, questions.id))
-      .where(inArray(examQuestions.examSectionId, sectionIds))
-      .orderBy(examQuestions.displayOrder);
-
-    // Get options for MCQ questions
+    // Get options for all questions in parallel
     const questionIds = examQs.map((q) => q.questionId);
     let optionsMap: Record<string, unknown[]> = {};
     if (questionIds.length > 0) {
@@ -449,6 +450,9 @@ const sessionRoutes: FastifyPluginAsync = async (app) => {
         });
       }
     }
+
+    // Cache exam paper for 5 minutes (immutable during an attempt)
+    reply.header("Cache-Control", "private, max-age=300");
 
     return reply.send({
       exam: examData,

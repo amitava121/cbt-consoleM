@@ -133,6 +133,7 @@ public partial class ExamViewModel : ObservableObject
         _webSocketService.ExamPaused += OnExamPaused;
         _webSocketService.ExamResumed += OnExamResumed;
         _webSocketService.ExamTerminated += OnExamTerminated;
+        _webSocketService.SessionAutoSubmitted += OnSessionAutoSubmitted;
         _webSocketService.TimeSynced += OnTimeSynced;
         _webSocketService.Disconnected += OnDisconnected;
         _webSocketService.Reconnected += OnReconnected;
@@ -484,6 +485,17 @@ public partial class ExamViewModel : ObservableObject
         _examTimer?.Stop();
         _heartbeatTimer?.Stop();
         Log.Warning("Exam terminated by admin. Reason: {Reason}", e.Reason);
+    }
+
+    private void OnSessionAutoSubmitted(object? sender, SessionAutoSubmittedPayload e)
+    {
+        _examTimer?.Stop();
+        _heartbeatTimer?.Stop();
+        RemainingTimeSeconds = 0;
+        UpdateTimerDisplay();
+        ExamState = ExamState.AutoSubmitted;
+        Log.Warning("Server auto-submitted exam. AttemptId: {AttemptId}, Reason: {Reason}",
+            e.AttemptId, e.Reason);
     }
 
     private void OnTimeSynced(object? sender, TimeSyncPayload e)

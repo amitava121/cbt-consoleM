@@ -1,0 +1,30 @@
+name: Windows Client Tests
+
+on:
+  push:
+    paths:
+      - "windows-client/**"
+      - ".github/workflows/windows-client-tests.yml"
+  pull_request:
+    paths:
+      - "windows-client/**"
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore windows-client/WindowsClient.sln
+
+      - name: Build
+        run: dotnet build windows-client/WindowsClient.sln --no-restore --configuration Debug
+
+      - name: Test
+        run: dotnet test windows-client/WindowsClient.sln --no-build --configuration Debug --verbosity normal

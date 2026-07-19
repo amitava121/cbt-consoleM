@@ -135,16 +135,17 @@ export default function ExamsPage() {
   const queryClient = useQueryClient();
   const [sorting, setSorting] = useState<SortingState>([]);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
   const [wizardStep, setWizardStep] = useState(0);
   const [form, setForm] = useState(emptyForm);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["exams", search],
+    queryKey: ["exams", search, page],
     queryFn: () =>
       examsService.list({
-        page: 1,
-        pageSize: 100,
+        page,
+        pageSize: 20,
         search: search || undefined,
       }),
     placeholderData: (prev) => prev,
@@ -229,7 +230,10 @@ export default function ExamsPage() {
           <Input
             placeholder="Search exams..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
             className="pl-8"
           />
         </div>
@@ -291,6 +295,34 @@ export default function ExamsPage() {
       <p className="text-sm text-muted-foreground">
         {data ? `${data.total} total exams` : "Loading..."}
       </p>
+
+      {data && data.total > 20 && (
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-muted-foreground">
+            Page {page} of {Math.ceil(data.total / 20)}
+          </span>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => p - 1)}
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Prev
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page >= Math.ceil(data.total / 20)}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              Next
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Create Exam Wizard */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>

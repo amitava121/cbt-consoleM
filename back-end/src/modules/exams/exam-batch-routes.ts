@@ -382,46 +382,76 @@ const examBatchRoutes: FastifyPluginAsync = async (app) => {
   /* ----- GET /exam-batches/:id/candidates — list candidates in batch ----- */
   app.get("/:id/candidates", async (request, reply) => {
     const { id } = request.params as { id: string };
+    const query = request.query as { page?: string; pageSize?: string };
+    const page = Math.max(1, parseInt(query.page ?? "1"));
+    const pageSize = Math.min(100, Math.max(1, parseInt(query.pageSize ?? "50")));
+    const offset = (page - 1) * pageSize;
 
-    const rows = await db
-      .select({
-        id: examBatchCandidates.id,
-        candidateId: examBatchCandidates.candidateId,
-        assignedAt: examBatchCandidates.assignedAt,
-        rollNumber: candidates.rollNumber,
-        admitCardNumber: candidates.admitCardNumber,
-        userId: candidates.userId,
-        isActive: candidates.isActive,
-      })
-      .from(examBatchCandidates)
-      .innerJoin(candidates, eq(examBatchCandidates.candidateId, candidates.id))
-      .where(eq(examBatchCandidates.examBatchId, id))
-      .orderBy(asc(examBatchCandidates.assignedAt));
+    const [rows, countResult] = await Promise.all([
+      db
+        .select({
+          id: examBatchCandidates.id,
+          candidateId: examBatchCandidates.candidateId,
+          assignedAt: examBatchCandidates.assignedAt,
+          rollNumber: candidates.rollNumber,
+          admitCardNumber: candidates.admitCardNumber,
+          userId: candidates.userId,
+          isActive: candidates.isActive,
+        })
+        .from(examBatchCandidates)
+        .innerJoin(candidates, eq(examBatchCandidates.candidateId, candidates.id))
+        .where(eq(examBatchCandidates.examBatchId, id))
+        .orderBy(asc(examBatchCandidates.assignedAt))
+        .limit(pageSize)
+        .offset(offset),
+      db
+        .select({ count: sql<number>`COUNT(*)::int` })
+        .from(examBatchCandidates)
+        .where(eq(examBatchCandidates.examBatchId, id)),
+    ]);
 
-    return reply.send({ data: rows, total: rows.length });
+    return reply.send({ data: rows, total: countResult[0]?.count ?? 0, page, pageSize });
   });
 
   /* ----- GET /exam-batches/:id/attempts — list attempts in batch ----- */
   app.get("/:id/attempts", async (request, reply) => {
     const { id } = request.params as { id: string };
+    const query = request.query as { page?: string; pageSize?: string; status?: string };
+    const page = Math.max(1, parseInt(query.page ?? "1"));
+    const pageSize = Math.min(100, Math.max(1, parseInt(query.pageSize ?? "50")));
+    const offset = (page - 1) * pageSize;
 
-    const rows = await db
-      .select({
-        id: attempts.id,
-        candidateId: attempts.candidateId,
-        deviceId: attempts.deviceId,
-        status: attempts.status,
-        startedAt: attempts.startedAt,
-        submittedAt: attempts.submittedAt,
-        remainingTimeSecs: attempts.remainingTimeSecs,
-        isReconnected: attempts.isReconnected,
-        reconnectedCount: attempts.reconnectedCount,
-      })
-      .from(attempts)
-      .where(eq(attempts.examBatchId, id))
-      .orderBy(asc(attempts.createdAt));
+    const conditions = [eq(attempts.examBatchId, id)];
+    if (query.status) {
+      conditions.push(eq(attempts.status, query.status as never));
+    }
+    const where = and(...conditions);
 
-    return reply.send({ data: rows, total: rows.length });
+    const [rows, countResult] = await Promise.all([
+      db
+        .select({
+          id: attempts.id,
+          candidateId: attempts.candidateId,
+          deviceId: attempts.deviceId,
+          status: attempts.status,
+          startedAt: attempts.startedAt,
+          submittedAt: attempts.submittedAt,
+          remainingTimeSecs: attempts.remainingTimeSecs,
+          isReconnected: attempts.isReconnected,
+          reconnectedCount: attempts.reconnectedCount,
+        })
+        .from(attempts)
+        .where(where)
+        .orderBy(asc(attempts.createdAt))
+        .limit(pageSize)
+        .offset(offset),
+      db
+        .select({ count: sql<number>`COUNT(*)::int` })
+        .from(attempts)
+        .where(where),
+    ]);
+
+    return reply.send({ data: rows, total: countResult[0]?.count ?? 0, page, pageSize });
   });
 
   /* ----- GET /exam-batches/:id/monitor — monitoring snapshot -----
