@@ -3,6 +3,7 @@ using CBT.ExamClient.Services;
 using CBT.ExamClient.ViewModels;
 using CBT.Shared.Models;
 using FluentAssertions;
+using NSubstitute;
 
 namespace CBT.ExamClient.Tests.ViewModels;
 
