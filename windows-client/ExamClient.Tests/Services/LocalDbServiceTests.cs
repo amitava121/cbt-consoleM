@@ -26,13 +26,20 @@ public class LocalDbServiceTests : IAsyncLifetime
         await _service.InitializeAsync(TestAttemptId, TestHardwareHash);
     }
 
-    public Task DisposeAsync()
+    public async Task DisposeAsync()
     {
         _service.Dispose();
-        // Clean up test database
+        // Allow SQLite to fully release file handles
+        await Task.Delay(100);
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        // Clean up test database and WAL/shm files
         var dbPath = CBT.Shared.Configuration.AppSettingsManager.GetDatabasePath();
-        if (File.Exists(dbPath)) File.Delete(dbPath);
-        return Task.CompletedTask;
+        foreach (var path in new[] { dbPath, dbPath + "-wal", dbPath + "-shm" })
+        {
+            try { if (File.Exists(path)) File.Delete(path); }
+            catch { /* best effort cleanup */ }
+        }
     }
 
     [Fact]
