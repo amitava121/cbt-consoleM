@@ -7,7 +7,7 @@ import {
     type ColumnDef,
     type SortingState,
 } from "@tanstack/react-table";
-import { FolderTree, Loader2, Plus, Search } from "lucide-react";
+import { ArrowLeft, Loader2, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "../components/ui/badge";
@@ -29,75 +29,106 @@ import {
     TableHeader,
     TableRow,
 } from "../components/ui/table";
-import { subjectsService, topicsService } from "../services/subjects";
-import type { Subject, Topic } from "../types";
+import { institutionsService } from "../services/organization";
+import { subjectsService } from "../services/subjects";
+import type { Subject } from "../types";
 
-const columns: ColumnDef<Subject>[] = [
-  {
-    accessorKey: "name",
-    header: "Name",
-    cell: ({ row }) => (
-      <span className="font-medium">{row.getValue("name")}</span>
-    ),
-  },
-  {
-    accessorKey: "code",
-    header: "Code",
-    cell: ({ row }) => (
-      <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-        {row.getValue("code")}
-      </code>
-    ),
-  },
-  {
-    accessorKey: "description",
-    header: "Description",
-    cell: ({ row }) => {
-      const val = row.getValue("description") as string | null;
-      return val ? <span className="text-muted-foreground">{val}</span> : "—";
-    },
-  },
-  {
-    accessorKey: "isActive",
-    header: "Status",
-    cell: ({ row }) => (
-      <Badge variant={row.getValue("isActive") ? "default" : "destructive"}>
-        {row.getValue("isActive") ? "Active" : "Disabled"}
-      </Badge>
-    ),
-  },
-];
-
-export default function SubjectsPage() {
+export default function SubjectsPage({
+  institutionId,
+  hideHeader: _hideHeader,
+  onBack,
+  onSelectSubject,
+}: {
+  institutionId?: string;
+  hideHeader?: boolean;
+  onBack?: () => void;
+  onSelectSubject?: (subject: Subject) => void;
+}) {
   const queryClient = useQueryClient();
   const [sorting, setSorting] = useState<SortingState>([]);
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
-  const [createForm, setCreateForm] = useState({
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Subject | null>(null);
+  const [editTarget, setEditTarget] = useState<Subject | null>(null);
+  const [editForm, setEditForm] = useState({
     name: "",
     code: "",
     description: "",
   });
-  const [selectedSubject, setSelectedSubject] = useState<Subject | null>(null);
-  const [topicCreateOpen, setTopicCreateOpen] = useState(false);
-  const [topicForm, setTopicForm] = useState({ name: "", description: "" });
+  const [createForm, setCreateForm] = useState({
+    institutionId: "",
+    name: "",
+    code: "",
+    description: "",
+  });
+  const { data: institutionsData } = useQuery({
+    queryKey: ["institutions-list"],
+    queryFn: () => institutionsService.list({ pageSize: 100 }),
+    staleTime: 30 * 1000,
+  });
+  const institutions = institutionsData?.data ?? [];
+
+  const columns: ColumnDef<Subject>[] = [
+    ...(institutionId
+      ? []
+      : [
+          {
+            accessorKey: "institutionId",
+            header: "Institution",
+            cell: ({ row }: { row: any }) => {
+              const inst = institutions.find(
+                (i) => i.id === row.getValue("institutionId"),
+              );
+              return inst ? inst.name : "—";
+            },
+          } as ColumnDef<Subject>,
+        ]),
+    {
+      accessorKey: "name",
+      header: "Name",
+      cell: ({ row }) => (
+        <span className="font-medium">{row.getValue("name")}</span>
+      ),
+    },
+    {
+      accessorKey: "code",
+      header: "Code",
+      cell: ({ row }) => (
+        <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+          {row.getValue("code")}
+        </code>
+      ),
+    },
+    {
+      accessorKey: "description",
+      header: "Description",
+      cell: ({ row }) => {
+        const val = row.getValue("description") as string | null;
+        return val ? <span className="text-muted-foreground">{val}</span> : "—";
+      },
+    },
+    {
+      accessorKey: "isActive",
+      header: "Status",
+      cell: ({ row }) => (
+        <Badge variant={row.getValue("isActive") ? "default" : "destructive"}>
+          {row.getValue("isActive") ? "Active" : "Disabled"}
+        </Badge>
+      ),
+    },
+  ];
 
   const { data, isLoading } = useQuery({
-    queryKey: ["subjects", search],
+    queryKey: ["subjects", search, institutionId],
     queryFn: () =>
       subjectsService.list({
         page: 1,
         pageSize: 100,
         search: search || undefined,
+        institutionId,
       }),
     placeholderData: (prev) => prev,
-  });
-
-  const { data: topicsData, isLoading: topicsLoading } = useQuery({
-    queryKey: ["subjects", selectedSubject?.id, "topics"],
-    queryFn: () => subjectsService.getTopics(selectedSubject!.id),
-    enabled: !!selectedSubject,
-    staleTime: 60 * 1000,
   });
 
   const createMutation = useMutation({
@@ -106,23 +137,39 @@ export default function SubjectsPage() {
       queryClient.invalidateQueries({ queryKey: ["subjects"] });
       toast.success("Subject created successfully");
       setCreateOpen(false);
-      setCreateForm({ name: "", code: "", description: "" });
+      setCreateForm({ institutionId: "", name: "", code: "", description: "" });
     },
-    onError: () => toast.error("Failed to create subject"),
+    onError: (err: { response?: { data?: { error?: string } } }) =>
+      toast.error(err.response?.data?.error ?? "Failed to create subject"),
   });
 
-  const createTopicMutation = useMutation({
-    mutationFn: () =>
-      topicsService.create({ subjectId: selectedSubject!.id, ...topicForm }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["subjects", selectedSubject?.id, "topics"],
-      });
-      toast.success("Topic created successfully");
-      setTopicCreateOpen(false);
-      setTopicForm({ name: "", description: "" });
+  const editMutation = useMutation({
+    mutationFn: () => {
+      if (!editTarget) throw new Error("No target");
+      return subjectsService.update(editTarget.id, editForm);
     },
-    onError: () => toast.error("Failed to create topic"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["subjects"] });
+      toast.success("Subject updated successfully");
+      setEditTarget(null);
+    },
+    onError: (err: { response?: { data?: { error?: string } } }) =>
+      toast.error(err.response?.data?.error ?? "Failed to update subject"),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => {
+      if (!deleteTarget) throw new Error("No target");
+      return subjectsService.permanentDelete(deleteTarget.id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["subjects"] });
+      toast.success("Subject deleted permanently");
+      setDeleteOpen(false);
+      setDeleteTarget(null);
+    },
+    onError: (err: { response?: { data?: { error?: string } } }) =>
+      toast.error(err.response?.data?.error ?? "Failed to delete subject"),
   });
 
   const tableData = useMemo(() => data?.data ?? [], [data]);
@@ -133,16 +180,45 @@ export default function SubjectsPage() {
       ...columns,
       {
         id: "actions",
-        header: "Topics",
+        header: "Actions",
         cell: ({ row }) => (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setSelectedSubject(row.original)}
-          >
-            <FolderTree className="mr-1 h-4 w-4" />
-            View
-          </Button>
+          <div className="flex items-center gap-2">
+            {onSelectSubject && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onSelectSubject(row.original)}
+              >
+                Questions
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                setEditTarget(row.original);
+                setEditForm({
+                  name: row.original.name,
+                  code: row.original.code,
+                  description: row.original.description ?? "",
+                });
+              }}
+              title="Edit subject"
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                setDeleteTarget(row.original);
+                setDeleteOpen(true);
+              }}
+              title="Delete subject permanently"
+            >
+              <Trash2 className="h-4 w-4 text-red-500" />
+            </Button>
+          </div>
         ),
       },
     ],
@@ -154,31 +230,39 @@ export default function SubjectsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            Subjects & Topics
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Manage academic subjects and their topics
-          </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3 flex-1">
+          {onBack && (
+            <Button variant="outline" size="sm" onClick={onBack}>
+              <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
+              Back
+            </Button>
+          )}
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search subjects by name or code..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9 h-9 text-xs"
+            />
+          </div>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" />
+        <Button
+          size="sm"
+          onClick={() => {
+            setCreateForm({
+              institutionId: institutionId || "",
+              name: "",
+              code: "",
+              description: "",
+            });
+            setCreateOpen(true);
+          }}
+        >
+          <Plus className="mr-1.5 h-3.5 w-3.5" />
           Add Subject
         </Button>
-      </div>
-
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search subjects..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-8"
-          />
-        </div>
       </div>
 
       <div className="rounded-md border border-border">
@@ -238,103 +322,6 @@ export default function SubjectsPage() {
         {data ? `${data.total} total subjects` : "Loading..."}
       </p>
 
-      {/* Topics Dialog */}
-      <Dialog
-        open={!!selectedSubject}
-        onOpenChange={(open) => !open && setSelectedSubject(null)}
-      >
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>
-              Topics — {selectedSubject?.name}
-              <span className="ml-2 text-sm font-normal text-muted-foreground">
-                ({selectedSubject?.code})
-              </span>
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="flex justify-end">
-              <Button size="sm" onClick={() => setTopicCreateOpen(true)}>
-                <Plus className="mr-1 h-4 w-4" />
-                Add Topic
-              </Button>
-            </div>
-            {topicsLoading ? (
-              <div className="flex justify-center py-8">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-              </div>
-            ) : (topicsData?.data ?? []).length === 0 ? (
-              <p className="py-8 text-center text-sm text-muted-foreground">
-                No topics yet. Create one to get started.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {(topicsData?.data ?? []).map((topic: Topic) => (
-                  <div
-                    key={topic.id}
-                    className="flex items-center justify-between rounded-md border border-border p-3"
-                  >
-                    <div>
-                      <p className="font-medium">{topic.name}</p>
-                      {topic.description && (
-                        <p className="text-sm text-muted-foreground">
-                          {topic.description}
-                        </p>
-                      )}
-                    </div>
-                    <Badge variant={topic.isActive ? "default" : "destructive"}>
-                      {topic.isActive ? "Active" : "Disabled"}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Inline topic create */}
-          {topicCreateOpen && (
-            <div className="space-y-3 border-t pt-4">
-              <div className="space-y-2">
-                <Label htmlFor="topic-name">Topic Name</Label>
-                <Input
-                  id="topic-name"
-                  value={topicForm.name}
-                  onChange={(e) =>
-                    setTopicForm((f) => ({ ...f, name: e.target.value }))
-                  }
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="topic-desc">Description (optional)</Label>
-                <Input
-                  id="topic-desc"
-                  value={topicForm.description}
-                  onChange={(e) =>
-                    setTopicForm((f) => ({ ...f, description: e.target.value }))
-                  }
-                />
-              </div>
-              <DialogFooter>
-                <Button
-                  variant="outline"
-                  onClick={() => setTopicCreateOpen(false)}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  onClick={() => createTopicMutation.mutate()}
-                  disabled={createTopicMutation.isPending || !topicForm.name}
-                >
-                  {createTopicMutation.isPending
-                    ? "Creating..."
-                    : "Create Topic"}
-                </Button>
-              </DialogFooter>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
       {/* Create Subject Dialog */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent>
@@ -342,6 +329,28 @@ export default function SubjectsPage() {
             <DialogTitle>Create New Subject</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
+            {!institutionId && (
+              <div className="space-y-2">
+                <Label>Institution</Label>
+                <select
+                  value={createForm.institutionId}
+                  onChange={(e) =>
+                    setCreateForm((f) => ({
+                      ...f,
+                      institutionId: e.target.value,
+                    }))
+                  }
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+                >
+                  <option value="">Select institution...</option>
+                  {institutions.map((i) => (
+                    <option key={i.id} value={i.id}>
+                      {i.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="subj-name">Name</Label>
               <Input
@@ -384,10 +393,106 @@ export default function SubjectsPage() {
             <Button
               onClick={() => createMutation.mutate()}
               disabled={
-                createMutation.isPending || !createForm.name || !createForm.code
+                createMutation.isPending ||
+                !createForm.institutionId ||
+                !createForm.name ||
+                !createForm.code
               }
             >
               {createMutation.isPending ? "Creating..." : "Create"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Subject Dialog */}
+      <Dialog
+        open={!!editTarget}
+        onOpenChange={(open) => !open && setEditTarget(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Subject</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-subj-name">Name</Label>
+              <Input
+                id="edit-subj-name"
+                value={editForm.name}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, name: e.target.value }))
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-subj-code">Code</Label>
+              <Input
+                id="edit-subj-code"
+                value={editForm.code}
+                onChange={(e) =>
+                  setEditForm((f) => ({
+                    ...f,
+                    code: e.target.value.toUpperCase(),
+                  }))
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-subj-desc">Description (optional)</Label>
+              <Input
+                id="edit-subj-desc"
+                value={editForm.description}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, description: e.target.value }))
+                }
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => editMutation.mutate()}
+              disabled={
+                editMutation.isPending || !editForm.name || !editForm.code
+              }
+            >
+              {editMutation.isPending ? "Saving..." : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation */}
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Subject Permanently</DialogTitle>
+          </DialogHeader>
+          <p className="py-4 text-sm text-muted-foreground">
+            Are you sure you want to permanently delete{" "}
+            <span className="font-medium text-foreground">
+              {deleteTarget?.name}
+            </span>
+            ? This will permanently delete all related questions, question
+            versions, options, tags, and batch associations. This action cannot
+            be undone.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => deleteMutation.mutate()}
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              Delete Permanently
             </Button>
           </DialogFooter>
         </DialogContent>

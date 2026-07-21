@@ -1,0 +1,227 @@
+---
+# CBE Console — Full System Test Environment
+#
+# Brings up the entire stack on an isolated Docker network:
+#   - PostgreSQL database
+#   - Redis cache
+#   - SeaweedFS (S3-compatible storage)
+#   - Backend API server (Fastify)
+#   - Admin panel (React + nginx)
+#   - 3 exam client containers (Node.js + headless Chrome)
+#
+# Usage:
+#   docker compose -f docker-compose.test.yml up --build
+#
+# Then open admin panel at: http://localhost:8080
+# Backend API at: http://localhost:3000
+# Each client logs to stdout with [LAB-PC-00X] prefix.
+#
+# To stop: Ctrl+C or docker compose -f docker-compose.test.yml down -v
+
+services:
+  # ============ Infrastructure ============
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: cbe-cm
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - test-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d cbe-cm"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - cbe-test-net
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    networks:
+      - cbe-test-net
+
+  seaweedfs-master:
+    image: chrislusf/seaweedfs:3.91
+    command: master -mdir=/data/master -ip=seaweedfs-master -port=9333
+    volumes:
+      - test-seaweed-master:/data/master
+    networks:
+      - cbe-test-net
+
+  seaweedfs-volume:
+    image: chrislusf/seaweedfs:3.91
+    command: volume -dir=/data/volume -max=200 -mserver=seaweedfs-master:9333 -port=8080
+    volumes:
+      - test-seaweed-volume:/data/volume
+    depends_on:
+      - seaweedfs-master
+    networks:
+      - cbe-test-net
+
+  seaweedfs-filer:
+    image: chrislusf/seaweedfs:3.91
+    command: filer -master=seaweedfs-master:9333 -port=8888 -ip=seaweedfs-filer -defaultStoreDir=/data/filer
+    volumes:
+      - test-seaweed-filer:/data/filer
+    depends_on:
+      - seaweedfs-master
+      - seaweedfs-volume
+    networks:
+      - cbe-test-net
+
+  seaweedfs-s3:
+    image: chrislusf/seaweedfs:3.91
+    command: s3 -filer=seaweedfs-filer:8888 -ip.bind=0.0.0.0 -port=8333 -config=/etc/seaweedfs/s3.json
+    volumes:
+      - ./seaweedfs-s3.json:/etc/seaweedfs/s3.json:ro
+    depends_on:
+      - seaweedfs-filer
+    networks:
+      - cbe-test-net
+
+  # ============ Backend Server ============
+
+  cbe-server:
+    build:
+      context: ./back-end
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: development
+      PORT: "3000"
+      HOST: "0.0.0.0"
+      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/cbe-cm"
+      REDIS_URL: "redis://redis:6379"
+      JWT_SECRET: "change-me-in-production-min-32-characters"
+      JWT_ACCESS_EXPIRY: "15m"
+      JWT_REFRESH_EXPIRY: "24h"
+      LOG_LEVEL: "info"
+      S3_ENDPOINT: "http://seaweedfs-s3:8333"
+      S3_REGION: "us-east-1"
+      S3_ACCESS_KEY: "admin"
+      S3_SECRET_KEY: "admin123456"
+      S3_BUCKET: "cbe-console"
+      S3_PUBLIC_URL: "http://seaweedfs-s3:8333"
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      seaweedfs-s3:
+        condition: service_started
+    networks:
+      - cbe-test-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ============ Admin Panel ============
+
+  cbe-admin:
+    build:
+      context: ./admin-panel
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      - cbe-server
+    networks:
+      - cbe-test-net
+
+  # ============ Exam Client Containers ============
+  # Each container simulates a real exam client machine:
+  #   - Unique hostname and IP on the Docker network
+  #   - Discovers server, self-registers, sends heartbeats
+  #   - Runs headless Chrome to test admin panel and exam UI
+  #   - Takes screenshots for verification
+
+  exam-client-01:
+    build:
+      context: ./back-end
+      dockerfile: tests/Dockerfile.client
+    environment:
+      CLIENT_ID: "LAB-PC-001"
+      CLIENT_NAME: "Lab1-PC01"
+      SERVER_URL: "http://cbe-server:3000"
+      ADMIN_URL: "http://cbe-admin"
+      HEARTBEAT_INTERVAL: "15"
+    depends_on:
+      cbe-server:
+        condition: service_healthy
+      cbe-admin:
+        condition: service_started
+    volumes:
+      - test-screenshots-01:/app/screenshots
+    networks:
+      - cbe-test-net
+    hostname: exam-client-01
+
+  exam-client-02:
+    build:
+      context: ./back-end
+      dockerfile: tests/Dockerfile.client
+    environment:
+      CLIENT_ID: "LAB-PC-002"
+      CLIENT_NAME: "Lab1-PC02"
+      SERVER_URL: "http://cbe-server:3000"
+      ADMIN_URL: "http://cbe-admin"
+      HEARTBEAT_INTERVAL: "15"
+    depends_on:
+      cbe-server:
+        condition: service_healthy
+      cbe-admin:
+        condition: service_started
+    volumes:
+      - test-screenshots-02:/app/screenshots
+    networks:
+      - cbe-test-net
+    hostname: exam-client-02
+
+  exam-client-03:
+    build:
+      context: ./back-end
+      dockerfile: tests/Dockerfile.client
+    environment:
+      CLIENT_ID: "LAB-PC-003"
+      CLIENT_NAME: "Lab1-PC03"
+      SERVER_URL: "http://cbe-server:3000"
+      ADMIN_URL: "http://cbe-admin"
+      HEARTBEAT_INTERVAL: "15"
+    depends_on:
+      cbe-server:
+        condition: service_healthy
+      cbe-admin:
+        condition: service_started
+    volumes:
+      - test-screenshots-03:/app/screenshots
+    networks:
+      - cbe-test-net
+    hostname: exam-client-03
+
+# ============ Network & Volumes ============
+
+networks:
+  cbe-test-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  test-pg-data:
+  test-seaweed-master:
+  test-seaweed-volume:
+  test-seaweed-filer:
+  test-screenshots-01:
+  test-screenshots-02:
+  test-screenshots-03:

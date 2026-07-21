@@ -24,13 +24,6 @@ export const questionTypeEnum = pgEnum("question_type", [
   "matrix_match",
 ]);
 
-export const difficultyLevelEnum = pgEnum("difficulty_level", [
-  "easy",
-  "medium",
-  "hard",
-  "very_hard",
-]);
-
 export const cognitiveLevelEnum = pgEnum("cognitive_level", [
   "remember",
   "understand",

@@ -8,6 +8,34 @@
       "when": 1784210575620,
       "tag": "0000_0000_initial_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1784499054503,
+      "tag": "0001_ordinary_texas_twister",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784553881895,
+      "tag": "0002_add_scheduled_start_at_to_exams",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784578737520,
+      "tag": "0003_tense_carlie_cooper",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1784586263113,
+      "tag": "0004_many_golden_guardian",
+      "breakpoints": true
     }
   ]
 }

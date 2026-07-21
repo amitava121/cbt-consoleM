@@ -1,10 +1,14 @@
 import { eq } from "drizzle-orm";
-import { db } from "../db.js";
-import { users, institutions } from "../schemas/index.js";
 import { hashPassword } from "../../services/auth.js";
+import { db } from "../db.js";
+import { institutions, users } from "../schemas/index.js";
 
 const seed = async () => {
-  const [existing] = await db.select().from(users).where(eq(users.email, "admin@cbe.local")).limit(1);
+  const [existing] = await db
+    .select()
+    .from(users)
+    .where(eq(users.email, "admin@cbe.local"))
+    .limit(1);
   if (existing) {
     console.log("Super admin already exists. Skipping seed.");
     return;
@@ -15,7 +19,6 @@ const seed = async () => {
     .values({
       name: "CBE Default Institution",
       code: "CBE-DEFAULT",
-      isActive: true,
     })
     .returning();
 

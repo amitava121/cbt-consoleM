@@ -163,6 +163,29 @@ public sealed class ApiService : IApiService
         return await GetAsync<List<ServerAnswerState>>($"candidate/attempts/{attemptId}/answers");
     }
 
+    public async Task<SelfRegisterResponse> SelfRegisterAsync(string deviceId, string deviceName, string macAddress, string hardwareHash, string? ipAddress = null)
+    {
+        var body = new
+        {
+            deviceId,
+            deviceName,
+            macAddress,
+            hardwareHash,
+            ipAddress = ipAddress ?? ""
+        };
+        return await PostAsync<SelfRegisterResponse>("devices/self-register", body, authenticated: false);
+    }
+
+    public async Task<HeartbeatResponse> SendHeartbeatAsync(string deviceId, string? ipAddress = null)
+    {
+        var body = new
+        {
+            deviceId,
+            ipAddress = ipAddress ?? ""
+        };
+        return await PostAsync<HeartbeatResponse>("devices/heartbeat", body, authenticated: false);
+    }
+
     // --- Private HTTP helpers (thread-safe, per-request headers) ---
 
     private async Task<T> GetAsync<T>(string endpoint, bool authenticated = true) where T : class

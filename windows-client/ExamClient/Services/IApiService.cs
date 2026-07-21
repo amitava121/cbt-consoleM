@@ -79,6 +79,18 @@ public interface IApiService
     /// GET /api/v1/candidate/attempts/:attemptId/answers
     /// </summary>
     Task<List<ServerAnswerState>> GetSavedAnswersAsync(string attemptId);
+
+    /// <summary>
+    /// Self-registers this device with the server (no auth required).
+    /// POST /api/v1/devices/self-register
+    /// </summary>
+    Task<SelfRegisterResponse> SelfRegisterAsync(string deviceId, string deviceName, string macAddress, string hardwareHash, string? ipAddress = null);
+
+    /// <summary>
+    /// Sends a heartbeat ping to the server (no auth required).
+    /// POST /api/v1/devices/heartbeat
+    /// </summary>
+    Task<HeartbeatResponse> SendHeartbeatAsync(string deviceId, string? ipAddress = null);
 }
 
 /// <summary>
@@ -90,4 +102,20 @@ public sealed class AttemptStatusResponse
     public string Status { get; set; } = string.Empty;
     public int RemainingTimeSeconds { get; set; }
     public string? LastQuestionId { get; set; }
+}
+
+public sealed class SelfRegisterResponse
+{
+    public string Id { get; set; } = string.Empty;
+    public string DeviceId { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
+}
+
+public sealed class HeartbeatResponse
+{
+    public string DeviceId { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string? LastSeenAt { get; set; }
+    public string ServerTime { get; set; } = string.Empty;
 }

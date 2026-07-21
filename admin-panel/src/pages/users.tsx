@@ -1,48 +1,44 @@
-import { useState, useMemo } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  useQuery,
-  useMutation,
-  useQueryClient,
-} from "@tanstack/react-query";
-import {
-  useReactTable,
-  getCoreRowModel,
-  getSortedRowModel,
-  getPaginationRowModel,
-  flexRender,
-  type SortingState,
-  type ColumnDef,
+    flexRender,
+    getCoreRowModel,
+    getPaginationRowModel,
+    getSortedRowModel,
+    useReactTable,
+    type ColumnDef,
+    type SortingState,
 } from "@tanstack/react-table";
+import { ChevronLeft, ChevronRight, Loader2, Plus, Search } from "lucide-react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import {
+    Dialog,
+    DialogContent,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "../components/ui/dialog";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from "../components/ui/table";
 import { usersService } from "../services/users";
 import type { User, UserRole } from "../types";
-import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
-import { Badge } from "../components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "../components/ui/dialog";
-import { Label } from "../components/ui/label";
-import { ChevronLeft, ChevronRight, Plus, Search, Loader2 } from "lucide-react";
 
-const roleColors: Record<UserRole, string> = {
-  super_admin: "bg-red-100 text-red-800",
-  exam_admin: "bg-blue-100 text-blue-800",
-  proctor: "bg-green-100 text-green-800",
-  question_author: "bg-purple-100 text-purple-800",
-  candidate: "bg-gray-100 text-gray-800",
+const roleVariants: Record<UserRole, "destructive" | "info" | "success" | "warning" | "secondary"> = {
+  super_admin: "destructive",
+  exam_admin: "info",
+  proctor: "success",
+  question_author: "warning",
+  candidate: "secondary",
 };
 
 const columns: ColumnDef<User>[] = [
@@ -50,12 +46,15 @@ const columns: ColumnDef<User>[] = [
     accessorKey: "fullName",
     header: "Name",
     cell: ({ row }) => (
-      <span className="font-medium">{row.getValue("fullName")}</span>
+      <span className="font-semibold text-foreground">{row.getValue("fullName")}</span>
     ),
   },
   {
     accessorKey: "email",
     header: "Email",
+    cell: ({ row }) => (
+      <span className="font-mono text-xs text-muted-foreground">{row.getValue("email")}</span>
+    ),
   },
   {
     accessorKey: "role",
@@ -63,7 +62,7 @@ const columns: ColumnDef<User>[] = [
     cell: ({ row }) => {
       const role = row.getValue("role") as UserRole;
       return (
-        <Badge variant="secondary" className={roleColors[role]}>
+        <Badge variant={roleVariants[role] ?? "secondary"} className="capitalize">
           {role.replace("_", " ")}
         </Badge>
       );
@@ -73,11 +72,12 @@ const columns: ColumnDef<User>[] = [
     accessorKey: "isActive",
     header: "Status",
     cell: ({ row }) => (
-      <Badge variant={row.getValue("isActive") ? "default" : "destructive"}>
+      <Badge variant={row.getValue("isActive") ? "success" : "destructive"}>
         {row.getValue("isActive") ? "Active" : "Disabled"}
       </Badge>
     ),
   },
+
   {
     accessorKey: "lastLoginAt",
     header: "Last Login",
@@ -108,6 +108,7 @@ export default function UsersPage() {
         page: pagination.pageIndex + 1,
         pageSize: pagination.pageSize,
         search: search || undefined,
+        excludeRole: "candidate",
       }),
     placeholderData: (prev) => prev,
   });
@@ -118,7 +119,12 @@ export default function UsersPage() {
       queryClient.invalidateQueries({ queryKey: ["users"] });
       toast.success("User created successfully");
       setCreateOpen(false);
-      setCreateForm({ email: "", password: "", fullName: "", role: "exam_admin" });
+      setCreateForm({
+        email: "",
+        password: "",
+        fullName: "",
+        role: "exam_admin",
+      });
     },
     onError: () => toast.error("Failed to create user"),
   });
@@ -140,33 +146,26 @@ export default function UsersPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Users</h1>
-          <p className="text-sm text-muted-foreground">
-            Manage system users and roles
-          </p>
-        </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          Add User
-        </Button>
-      </div>
-
-      <div className="flex items-center gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Search users..."
+            placeholder="Search users by name, email..."
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
               setPagination((p) => ({ ...p, pageIndex: 0 }));
             }}
-            className="pl-8"
+            className="pl-9 h-9 text-xs"
           />
         </div>
+        <Button size="sm" onClick={() => setCreateOpen(true)}>
+          <Plus className="mr-1.5 h-3.5 w-3.5" />
+          Add User
+        </Button>
       </div>
+
+
 
       <div className="rounded-md border border-border">
         <Table>
@@ -187,13 +186,19 @@ export default function UsersPage() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={columns.length} className="h-24 text-center">
+                <TableCell
+                  colSpan={columns.length}
+                  className="h-24 text-center"
+                >
                   <Loader2 className="mx-auto h-6 w-6 animate-spin text-muted-foreground" />
                 </TableCell>
               </TableRow>
             ) : tableData.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={columns.length} className="h-24 text-center text-muted-foreground">
+                <TableCell
+                  colSpan={columns.length}
+                  className="h-24 text-center text-muted-foreground"
+                >
                   No users found
                 </TableCell>
               </TableRow>
@@ -202,7 +207,10 @@ export default function UsersPage() {
                 <TableRow key={row.id}>
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      {flexRender(
+                        cell.column.columnDef.cell,
+                        cell.getContext(),
+                      )}
                     </TableCell>
                   ))}
                 </TableRow>
@@ -297,15 +305,11 @@ export default function UsersPage() {
                 <option value="exam_admin">Exam Admin</option>
                 <option value="proctor">Proctor</option>
                 <option value="question_author">Question Author</option>
-                <option value="candidate">Candidate</option>
               </select>
             </div>
           </div>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setCreateOpen(false)}
-            >
+            <Button variant="outline" onClick={() => setCreateOpen(false)}>
               Cancel
             </Button>
             <Button

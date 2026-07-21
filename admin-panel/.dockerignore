@@ -1,0 +1,5 @@
+# .dockerignore for admin-panel
+node_modules
+dist
+.env
+.git

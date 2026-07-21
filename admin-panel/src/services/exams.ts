@@ -1,11 +1,11 @@
 import type {
-  AddExamQuestionsInput,
-  CreateExamInput,
-  CreateSectionInput,
-  Exam,
-  ExamSection,
-  PaginatedResponse,
-  UpdateExamInput,
+    AddExamQuestionsInput,
+    CreateExamInput,
+    CreateSectionInput,
+    Exam,
+    ExamSection,
+    PaginatedResponse,
+    UpdateExamInput,
 } from "../types/index.js";
 import api from "./api.js";
 
@@ -14,8 +14,9 @@ export const examsService = {
     page?: number;
     pageSize?: number;
     search?: string;
-  }) =>
-    api.get<unknown, PaginatedResponse<Exam>>("/exams", { params }),
+    subjectId?: string;
+    institutionId?: string;
+  }) => api.get<unknown, PaginatedResponse<Exam>>("/exams", { params }),
 
   getById: (id: string) => api.get<unknown, Exam>(`/exams/${id}`),
 
@@ -27,6 +28,9 @@ export const examsService = {
   deactivate: (id: string) =>
     api.delete<unknown, { message: string }>(`/exams/${id}`),
 
+  permanentDelete: (id: string) =>
+    api.delete<unknown, { message: string }>(`/exams/${id}/permanent`),
+
   /* ----- Sections ----- */
   addSection: (examId: string, data: CreateSectionInput) =>
     api.post<unknown, ExamSection>(`/exams/${examId}/sections`, data),
@@ -35,7 +39,11 @@ export const examsService = {
     examId: string,
     sectionId: string,
     data: Partial<CreateSectionInput>,
-  ) => api.put<unknown, ExamSection>(`/exams/${examId}/sections/${sectionId}`, data),
+  ) =>
+    api.put<unknown, ExamSection>(
+      `/exams/${examId}/sections/${sectionId}`,
+      data,
+    ),
 
   removeSection: (examId: string, sectionId: string) =>
     api.delete<unknown, { message: string }>(
@@ -53,12 +61,31 @@ export const examsService = {
       data,
     ),
 
-  removeQuestion: (
-    examId: string,
-    sectionId: string,
-    eqId: string,
-  ) =>
+  removeQuestion: (examId: string, sectionId: string, eqId: string) =>
     api.delete<unknown, { message: string }>(
       `/exams/${examId}/sections/${sectionId}/questions/${eqId}`,
     ),
+
+  importQuestions: (examId: string, file: File, subjectId: string) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("subjectId", subjectId);
+    return api.post<
+      unknown,
+      {
+        success: boolean;
+        sections: {
+          sectionName: string;
+          sectionId: string;
+          imported: number;
+          failed: number;
+          errors?: { row: number; error: string }[];
+        }[];
+        totalImported: number;
+        totalFailed: number;
+      }
+    >(`/exams/${examId}/import-questions`, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+  },
 };

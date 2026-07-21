@@ -9,27 +9,32 @@ import Fastify from "fastify";
 import { env } from "./config/env.js";
 import { closePool, getPoolStats } from "./database/db.js";
 import { closeRedis } from "./database/redis.js";
+import analyticsRoutes from "./modules/analytics/analytics-routes.js";
 import authRoutes from "./modules/auth/routes.js";
 import candidateExamRoutes from "./modules/candidate/candidate-exam-routes.js";
+import dashboardRoutes from "./modules/dashboard/dashboard-routes.js";
 import examBatchRoutes from "./modules/exams/exam-batch-routes.js";
 import examRoutes from "./modules/exams/exam-routes.js";
+import monitoringRoutes from "./modules/monitoring/monitoring-routes.js";
 import candidateRoutes from "./modules/organization/candidate-routes.js";
+import devicePublicRoutes from "./modules/organization/device-public-routes.js";
 import deviceRoutes from "./modules/organization/device-routes.js";
 import {
     batchesRoutes,
-    centersRoutes,
     institutionsRoutes,
 } from "./modules/organization/org-routes.js";
-import questionBanksRoutes from "./modules/question-bank/banks-routes.js";
 import importExportRoutes from "./modules/question-bank/import-export-routes.js";
 import questionsRoutes from "./modules/question-bank/questions-routes.js";
-import {
-    subjectsRoutes,
-    topicsRoutes,
-} from "./modules/question-bank/subjects-routes.js";
+import { subjectsRoutes } from "./modules/question-bank/subjects-routes.js";
+import resultsRoutes from "./modules/results/results-routes.js";
+import sebRoutes from "./modules/seb/seb-routes.js";
 import sessionRoutes from "./modules/sessions/session-routes.js";
 import usersRoutes from "./modules/users/routes.js";
 import { verifyToken } from "./services/auth.js";
+import {
+    startDisconnectWatcher,
+    stopDisconnectWatcher,
+} from "./services/disconnect-watcher.js";
 import {
     startTimerScheduler,
     stopTimerScheduler,
@@ -67,7 +72,7 @@ app.register(compress, {
 });
 app.register(rateLimit, { max: 100, timeWindow: "1 minute" });
 app.register(multipart, {
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: 100 * 1024 * 1024 },
 });
 
 // Allow empty JSON bodies for POST routes that don't require a body (e.g. /resume, /submit)
@@ -116,6 +121,10 @@ app.get("/api/v1/health", async () => ({
   success: true,
   data: { status: "ok", env: env.NODE_ENV },
 }));
+
+// Public device routes — no auth required (LAN client discovery, self-registration, heartbeat)
+await app.register(devicePublicRoutes, { prefix: "/api/v1/devices" });
+await app.register(devicePublicRoutes, { prefix: "/api/devices" });
 
 // Register /api/v1/* routes with response envelope (API_SPECIFICATION.md Section 2.5)
 await app.register(
@@ -197,13 +206,8 @@ await app.register(
       await protectedScope.register(institutionsRoutes, {
         prefix: "/institutions",
       });
-      await protectedScope.register(centersRoutes, { prefix: "/centers" });
       await protectedScope.register(batchesRoutes, { prefix: "/batches" });
       await protectedScope.register(subjectsRoutes, { prefix: "/subjects" });
-      await protectedScope.register(topicsRoutes, { prefix: "/topics" });
-      await protectedScope.register(questionBanksRoutes, {
-        prefix: "/question-banks",
-      });
       await protectedScope.register(questionsRoutes, { prefix: "/questions" });
       await protectedScope.register(importExportRoutes, {
         prefix: "/questions",
@@ -218,6 +222,7 @@ await app.register(
       await protectedScope.register(candidateExamRoutes, {
         prefix: "/candidate/exams",
       });
+      await protectedScope.register(sebRoutes, { prefix: "/seb" });
     });
   },
   { prefix: "/api/v1" },
@@ -242,13 +247,8 @@ await app.register(async (protectedScope) => {
   await protectedScope.register(institutionsRoutes, {
     prefix: "/api/institutions",
   });
-  await protectedScope.register(centersRoutes, { prefix: "/api/centers" });
   await protectedScope.register(batchesRoutes, { prefix: "/api/batches" });
   await protectedScope.register(subjectsRoutes, { prefix: "/api/subjects" });
-  await protectedScope.register(topicsRoutes, { prefix: "/api/topics" });
-  await protectedScope.register(questionBanksRoutes, {
-    prefix: "/api/question-banks",
-  });
   await protectedScope.register(questionsRoutes, { prefix: "/api/questions" });
   await protectedScope.register(importExportRoutes, {
     prefix: "/api/questions",
@@ -266,12 +266,29 @@ await app.register(async (protectedScope) => {
   await protectedScope.register(sessionRoutes, {
     prefix: "/api/sessions",
   });
+  await protectedScope.register(resultsRoutes, {
+    prefix: "/api/results",
+  });
+  await protectedScope.register(monitoringRoutes, {
+    prefix: "/api/monitoring",
+  });
+  await protectedScope.register(analyticsRoutes, {
+    prefix: "/api/analytics",
+  });
+  await protectedScope.register(dashboardRoutes, {
+    prefix: "/api/dashboard",
+  });
+  await protectedScope.register(candidateExamRoutes, {
+    prefix: "/api/candidate/exams",
+  });
+  await protectedScope.register(sebRoutes, { prefix: "/api/seb" });
 });
 
 await app.register(websocketPlugin);
 
 app.addHook("onClose", async () => {
   stopTimerScheduler();
+  stopDisconnectWatcher();
   await closeRedis();
   await closePool();
 });
@@ -285,6 +302,12 @@ const start = async () => {
     startTimerScheduler();
     app.log.info(
       "Timer scheduler started — Redis ZSET promoter (1s) + DB fallback (60s)",
+    );
+
+    // Start disconnect watcher for auto-pause on client disconnect
+    await startDisconnectWatcher();
+    app.log.info(
+      "Disconnect watcher started — Redis keyspace + fallback poller",
     );
   } catch (err) {
     app.log.error(err);

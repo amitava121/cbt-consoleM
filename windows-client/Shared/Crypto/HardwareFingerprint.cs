@@ -48,7 +48,7 @@ public static class HardwareFingerprint
         return string.Empty;
     }
 
-    private static string GetPrimaryMacAddress()
+    public static string GetPrimaryMacAddress()
     {
         try
         {

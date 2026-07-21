@@ -72,32 +72,25 @@ export default function AuditLogsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Audit Logs</h1>
-          <p className="text-sm text-muted-foreground">
-            Tamper-evident audit trail of all system actions
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handleExport("csv")}
-          >
-            <Download className="mr-2 h-4 w-4" />
-            Export CSV
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handleExport("json")}
-          >
-            <Download className="mr-2 h-4 w-4" />
-            Export JSON
-          </Button>
-        </div>
+      <div className="flex items-center justify-end gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => handleExport("csv")}
+        >
+          <Download className="mr-1.5 h-3.5 w-3.5" />
+          Export CSV
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => handleExport("json")}
+        >
+          <Download className="mr-1.5 h-3.5 w-3.5" />
+          Export JSON
+        </Button>
       </div>
+
 
       <div className="flex flex-wrap gap-2">
         <div className="relative flex-1 min-w-[200px]">

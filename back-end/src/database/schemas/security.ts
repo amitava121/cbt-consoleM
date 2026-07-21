@@ -8,7 +8,7 @@ import {
     varchar,
 } from "drizzle-orm/pg-core";
 import { auditActionEnum, deviceStatusEnum } from "./enums.js";
-import { centers, users } from "./organizational.js";
+import { users } from "./organizational.js";
 
 export const deviceRegistrations = pgTable(
   "device_registrations",
@@ -19,7 +19,7 @@ export const deviceRegistrations = pgTable(
     macAddress: varchar("mac_address", { length: 17 }).notNull(),
     hardwareHash: varchar("hardware_hash", { length: 255 }).notNull(),
     ipAddress: varchar("ip_address", { length: 45 }),
-    centerId: uuid("center_id").references(() => centers.id),
+    clientVersion: varchar("client_version", { length: 50 }),
     status: deviceStatusEnum("status").notNull().default("registered"),
     registeredBy: uuid("registered_by")
       .notNull()
@@ -32,10 +32,7 @@ export const deviceRegistrations = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (table) => [
-    index("idx_device_registrations_center_id").on(table.centerId),
-    index("idx_device_registrations_status").on(table.status),
-  ],
+  (table) => [index("idx_device_registrations_status").on(table.status)],
 );
 
 export const auditLogs = pgTable(

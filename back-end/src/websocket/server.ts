@@ -43,6 +43,22 @@ const websocketPlugin: FastifyPluginAsync = async (app) => {
       return;
     }
 
+    // Reject duplicate WebSocket connections for the same user
+    const existingSocket = roomManager.getSocketByUserId(meta.userId);
+    if (existingSocket && existingSocket !== socket) {
+      app.log.info(
+        { userId: meta.userId },
+        "Duplicate WebSocket connection — closing old socket",
+      );
+      roomManager.sendTo(existingSocket, {
+        type: "server:error",
+        message: "Session taken over by another connection",
+        code: "DUPLICATE_SESSION",
+      });
+      existingSocket.close(1008, "Session taken over");
+      roomManager.leave(existingSocket);
+    }
+
     for (const room of roomManager.getRoomsForSocket(socket, meta)) {
       roomManager.join(room, socket, meta);
     }

@@ -1,18 +1,20 @@
 import { and, asc, eq, ilike, inArray, sql } from "drizzle-orm";
 import {
-    type FastifyPluginAsync,
-    type FastifyReply,
-    type FastifyRequest,
+  type FastifyPluginAsync,
+  type FastifyReply,
+  type FastifyRequest,
 } from "fastify";
 import { z } from "zod";
 import { db } from "../../database/db.js";
 import {
-    attempts,
-    candidates,
-    examBatchCandidates,
-    examBatches,
-    examSchedules,
-    exams,
+  attempts,
+  batchCandidates,
+  batches,
+  candidates,
+  examBatchCandidates,
+  examBatches,
+  exams,
+  subjects,
 } from "../../database/schemas/index.js";
 import { requireRole } from "../../middleware/rbac.js";
 
@@ -21,9 +23,7 @@ import { requireRole } from "../../middleware/rbac.js";
 const createBatchSchema = z.object({
   examId: z.string().uuid(),
   batchId: z.string().uuid().optional().nullable(),
-  centerId: z.string().uuid().optional().nullable(),
   name: z.string().min(1).max(255),
-  shiftNumber: z.number().int().min(1).default(1),
   scheduledStartAt: z.string().datetime(),
   scheduledEndAt: z.string().datetime(),
   gracePeriodMinutes: z.number().int().min(0).max(120).default(5),
@@ -40,7 +40,7 @@ const assignCandidatesSchema = z.object({
 /* ---------- Lifecycle transitions ---------- */
 
 const VALID_TRANSITIONS: Record<string, string[]> = {
-  draft: ["scheduled"],
+  draft: ["scheduled", "active"],
   scheduled: ["published", "draft"],
   published: ["active", "scheduled"],
   active: ["paused", "submission_window", "finished"],
@@ -93,10 +93,8 @@ const examBatchRoutes: FastifyPluginAsync = async (app) => {
             id: examBatches.id,
             examId: examBatches.examId,
             batchId: examBatches.batchId,
-            centerId: examBatches.centerId,
             name: examBatches.name,
             status: examBatches.status,
-            shiftNumber: examBatches.shiftNumber,
             scheduledStartAt: examBatches.scheduledStartAt,
             scheduledEndAt: examBatches.scheduledEndAt,
             actualStartAt: examBatches.actualStartAt,
@@ -104,8 +102,15 @@ const examBatchRoutes: FastifyPluginAsync = async (app) => {
             gracePeriodMinutes: examBatches.gracePeriodMinutes,
             createdAt: examBatches.createdAt,
             updatedAt: examBatches.updatedAt,
+            examName: exams.name,
+            examCode: exams.code,
+            subjectName: subjects.name,
+            batchName: batches.name,
           })
           .from(examBatches)
+          .leftJoin(exams, eq(examBatches.examId, exams.id))
+          .leftJoin(subjects, eq(exams.subjectId, subjects.id))
+          .leftJoin(batches, eq(examBatches.batchId, batches.id))
           .where(where)
           .orderBy(asc(examBatches.scheduledStartAt))
           .limit(pageSize)
@@ -170,16 +175,14 @@ const examBatchRoutes: FastifyPluginAsync = async (app) => {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const [batch, schedules, candidateCount] = await Promise.all([
+      const [batch, candidateCount] = await Promise.all([
         db
           .select({
             id: examBatches.id,
             examId: examBatches.examId,
             batchId: examBatches.batchId,
-            centerId: examBatches.centerId,
             name: examBatches.name,
             status: examBatches.status,
-            shiftNumber: examBatches.shiftNumber,
             scheduledStartAt: examBatches.scheduledStartAt,
             scheduledEndAt: examBatches.scheduledEndAt,
             actualStartAt: examBatches.actualStartAt,
@@ -195,18 +198,6 @@ const examBatchRoutes: FastifyPluginAsync = async (app) => {
           .where(eq(examBatches.id, id))
           .limit(1),
         db
-          .select({
-            id: examSchedules.id,
-            examBatchId: examSchedules.examBatchId,
-            startAt: examSchedules.startAt,
-            endAt: examSchedules.endAt,
-            isActive: examSchedules.isActive,
-            createdAt: examSchedules.createdAt,
-          })
-          .from(examSchedules)
-          .where(eq(examSchedules.examBatchId, id))
-          .orderBy(asc(examSchedules.startAt)),
-        db
           .select({ count: sql<number>`COUNT(*)::int` })
           .from(examBatchCandidates)
           .where(eq(examBatchCandidates.examBatchId, id)),
@@ -217,7 +208,6 @@ const examBatchRoutes: FastifyPluginAsync = async (app) => {
 
       return reply.send({
         ...batch,
-        schedules,
         candidateCount: candidateCount[0]?.count ?? 0,
       });
     },
@@ -293,7 +283,11 @@ const examBatchRoutes: FastifyPluginAsync = async (app) => {
     const result = await db.transaction(async (tx) => {
       // Lock the row and read current status atomically
       const [batch] = await tx
-        .select({ id: examBatches.id, status: examBatches.status })
+        .select({
+          id: examBatches.id,
+          status: examBatches.status,
+          batchId: examBatches.batchId,
+        })
         .from(examBatches)
         .where(eq(examBatches.id, id))
         .for("update")
@@ -315,7 +309,34 @@ const examBatchRoutes: FastifyPluginAsync = async (app) => {
         updatedAt: new Date(),
       };
 
-      if (targetStatus === "active") updateData.actualStartAt = new Date();
+      if (targetStatus === "active") {
+        updateData.actualStartAt = new Date();
+
+        // Auto-populate candidates from the associated batch if none assigned yet
+        if (batch.batchId) {
+          const existingCount = await tx
+            .select({ count: sql<number>`COUNT(*)::int` })
+            .from(examBatchCandidates)
+            .where(eq(examBatchCandidates.examBatchId, id));
+          if (existingCount[0].count === 0) {
+            const batchCands = await tx
+              .select({ candidateId: batchCandidates.candidateId })
+              .from(batchCandidates)
+              .where(eq(batchCandidates.batchId, batch.batchId));
+            if (batchCands.length > 0) {
+              await tx
+                .insert(examBatchCandidates)
+                .values(
+                  batchCands.map((c) => ({
+                    examBatchId: id,
+                    candidateId: c.candidateId,
+                  })),
+                )
+                .onConflictDoNothing();
+            }
+          }
+        }
+      }
       if (targetStatus === "finished") updateData.actualEndAt = new Date();
 
       const [updated] = await tx
@@ -330,6 +351,11 @@ const examBatchRoutes: FastifyPluginAsync = async (app) => {
     return reply.code(result.code).send(result.body);
   };
 
+  app.post(
+    "/:id/schedule",
+    { preHandler: requireRole("super_admin", "exam_admin") },
+    async (request, reply) => lifecycleHandler(request, reply, "scheduled"),
+  );
   app.post(
     "/:id/publish",
     { preHandler: requireRole("super_admin", "exam_admin") },
@@ -420,6 +446,168 @@ const examBatchRoutes: FastifyPluginAsync = async (app) => {
         message: `${added} candidate(s) assigned`,
         added,
         skipped,
+      });
+    },
+  );
+
+  /* ----- POST /exam-batches/:id/candidates/check-conflicts -----
+   *
+   * Checks if any of the given candidateIds are already assigned to
+   * another exam batch with an overlapping time window.
+   * Returns a list of conflicts with the conflicting exam details.
+   */
+  app.post(
+    "/:id/candidates/check-conflicts",
+    { preHandler: requireRole("super_admin", "exam_admin") },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const parsed = assignCandidatesSchema.safeParse(request.body);
+      if (!parsed.success)
+        return reply.code(400).send({
+          error: "Validation failed",
+          details: parsed.error.flatten().fieldErrors,
+        });
+
+      const candidateIds = parsed.data.candidateIds;
+
+      // Get the current batch's schedule
+      const [currentBatch] = await db
+        .select({
+          id: examBatches.id,
+          scheduledStartAt: examBatches.scheduledStartAt,
+          scheduledEndAt: examBatches.scheduledEndAt,
+          examId: examBatches.examId,
+        })
+        .from(examBatches)
+        .where(eq(examBatches.id, id))
+        .limit(1);
+
+      if (!currentBatch)
+        return reply.code(404).send({ error: "Exam batch not found" });
+
+      const batchStart = currentBatch.scheduledStartAt;
+      const batchEnd = currentBatch.scheduledEndAt;
+
+      // Find all other exam batches where these candidates are assigned
+      // and whose schedule overlaps with the current batch
+      const conflicts = await db
+        .select({
+          candidateId: examBatchCandidates.candidateId,
+          conflictingBatchId: examBatches.id,
+          conflictingBatchName: examBatches.name,
+          conflictingExamId: examBatches.examId,
+          conflictingExamName: exams.name,
+          conflictingStartAt: examBatches.scheduledStartAt,
+          conflictingEndAt: examBatches.scheduledEndAt,
+          conflictingBatchStatus: examBatches.status,
+        })
+        .from(examBatchCandidates)
+        .innerJoin(
+          examBatches,
+          eq(examBatches.id, examBatchCandidates.examBatchId),
+        )
+        .innerJoin(exams, eq(exams.id, examBatches.examId))
+        .where(
+          and(
+            inArray(examBatchCandidates.candidateId, candidateIds),
+            sql`${examBatches.id} != ${id}`,
+            // Overlap: batchStart < otherEnd AND batchEnd > otherStart
+            sql`${batchStart} < ${examBatches.scheduledEndAt}`,
+            sql`${batchEnd} > ${examBatches.scheduledStartAt}`,
+          ),
+        );
+
+      // Group conflicts by candidate
+      const conflictMap = new Map<
+        string,
+        Array<{
+          batchId: string;
+          batchName: string;
+          examId: string;
+          examName: string;
+          startAt: string;
+          endAt: string;
+          status: string;
+        }>
+      >();
+
+      for (const c of conflicts) {
+        const entry = conflictMap.get(c.candidateId) ?? [];
+        entry.push({
+          batchId: c.conflictingBatchId,
+          batchName: c.conflictingBatchName,
+          examId: c.conflictingExamId,
+          examName: c.conflictingExamName,
+          startAt: c.conflictingStartAt?.toISOString() ?? "",
+          endAt: c.conflictingEndAt?.toISOString() ?? "",
+          status: c.conflictingBatchStatus,
+        });
+        conflictMap.set(c.candidateId, entry);
+      }
+
+      // Also fetch candidate names for the response
+      const candidateInfo = await db
+        .select({
+          id: candidates.id,
+          admitCardNumber: candidates.admitCardNumber,
+          rollNumber: candidates.rollNumber,
+        })
+        .from(candidates)
+        .where(inArray(candidates.id, candidateIds));
+
+      const candidateMap = new Map<
+        string,
+        { admitCardNumber: string; rollNumber: string | null }
+      >();
+      for (const c of candidateInfo) {
+        candidateMap.set(c.id, {
+          admitCardNumber: c.admitCardNumber ?? "",
+          rollNumber: c.rollNumber ?? null,
+        });
+      }
+
+      const result = Array.from(conflictMap.entries()).map(
+        ([candidateId, exams]) => ({
+          candidateId,
+          admitCardNumber: candidateMap.get(candidateId)?.admitCardNumber ?? "",
+          rollNumber: candidateMap.get(candidateId)?.rollNumber ?? null,
+          conflicts: exams,
+        }),
+      );
+
+      return reply.send({
+        hasConflicts: result.length > 0,
+        conflictingCandidates: result,
+      });
+    },
+  );
+
+  /* ----- DELETE /exam-batches/:id/candidates — remove candidates from batch ----- */
+  app.delete(
+    "/:id/candidates",
+    { preHandler: requireRole("super_admin", "exam_admin") },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const parsed = assignCandidatesSchema.safeParse(request.body);
+      if (!parsed.success)
+        return reply.code(400).send({
+          error: "Validation failed",
+          details: parsed.error.flatten().fieldErrors,
+        });
+
+      const deleted = await db
+        .delete(examBatchCandidates)
+        .where(
+          and(
+            eq(examBatchCandidates.examBatchId, id),
+            inArray(examBatchCandidates.candidateId, parsed.data.candidateIds),
+          ),
+        )
+        .returning({ candidateId: examBatchCandidates.candidateId });
+
+      return reply.send({
+        message: `${deleted.length} candidate(s) removed`,
+        removed: deleted.length,
       });
     },
   );

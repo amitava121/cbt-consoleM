@@ -16,6 +16,18 @@ export default defineConfig({
                 target: "http://localhost:3000",
                 changeOrigin: true,
             },
+            "/ws": {
+                target: "ws://localhost:3000",
+                ws: true,
+            },
         },
+    },
+    build: {
+        // Target modern browsers for smaller bundles
+        target: "es2022",
+        // Reduce chunk size warnings threshold
+        chunkSizeWarningLimit: 600,
+        // Enable source maps for debugging production issues
+        sourcemap: true,
     },
 });

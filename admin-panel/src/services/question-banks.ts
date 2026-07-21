@@ -21,8 +21,6 @@ export const questionBanksService = {
       page?: number;
       pageSize?: number;
       type?: string;
-      difficulty?: string;
-      isApproved?: boolean;
       search?: string;
     },
   ) =>

@@ -106,30 +106,23 @@ export default function QuestionBanksPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Question Banks</h1>
-          <p className="text-sm text-muted-foreground">
-            Manage question banks for organizing questions
-          </p>
-        </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          Add Bank
-        </Button>
-      </div>
-
-      <div className="flex items-center gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="Search question banks..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-8"
+            className="pl-9 h-9 text-xs"
           />
         </div>
+        <Button size="sm" onClick={() => setCreateOpen(true)}>
+          <Plus className="mr-1.5 h-3.5 w-3.5" />
+          Add Bank
+        </Button>
       </div>
+
+
 
       <div className="rounded-md border border-border">
         <Table>

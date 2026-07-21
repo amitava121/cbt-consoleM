@@ -316,7 +316,7 @@ const systemRoutes: FastifyPluginAsync = async (app) => {
   });
 
   /* ----- GET /health/detailed — detailed health check ----- */
-  app.get("/health/detailed", async (request, reply) => {
+  app.get("/health/detailed", async (_request, reply) => {
     const poolStats = getPoolStats();
 
     // Test DB connectivity

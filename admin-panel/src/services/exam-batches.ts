@@ -1,14 +1,15 @@
 import type {
-  AssignCandidatesInput,
-  CreateExamBatchInput,
-  ExamBatch,
-  ExamBatchAttempt,
-  ExamBatchCandidate,
-  ExamBatchDetail,
-  ExamBatchListItem,
-  ExamBatchMonitor,
-  PaginatedResponse,
-  UpdateExamBatchInput,
+    AssignCandidatesInput,
+    CheckConflictsResponse,
+    CreateExamBatchInput,
+    ExamBatch,
+    ExamBatchAttempt,
+    ExamBatchCandidate,
+    ExamBatchDetail,
+    ExamBatchListItem,
+    ExamBatchMonitor,
+    PaginatedResponse,
+    UpdateExamBatchInput,
 } from "../types/index.js";
 import api from "./api.js";
 
@@ -34,6 +35,8 @@ export const examBatchService = {
     api.put<unknown, ExamBatch>(`/exam-batches/${id}`, data),
 
   /* ----- Lifecycle ----- */
+  schedule: (id: string) =>
+    api.post<unknown, ExamBatch>(`/exam-batches/${id}/schedule`),
   publish: (id: string) =>
     api.post<unknown, ExamBatch>(`/exam-batches/${id}/publish`),
   activate: (id: string) =>
@@ -52,6 +55,18 @@ export const examBatchService = {
     api.post<unknown, { message: string; added: number; skipped: number }>(
       `/exam-batches/${id}/candidates`,
       data,
+    ),
+
+  checkConflicts: (id: string, data: AssignCandidatesInput) =>
+    api.post<unknown, CheckConflictsResponse>(
+      `/exam-batches/${id}/candidates/check-conflicts`,
+      data,
+    ),
+
+  removeCandidates: (id: string, data: AssignCandidatesInput) =>
+    api.delete<unknown, { message: string; removed: number }>(
+      `/exam-batches/${id}/candidates`,
+      { data },
     ),
 
   listCandidates: (id: string) =>

@@ -11,9 +11,7 @@ import {
 import { requireRole } from "../../middleware/rbac.js";
 
 const createQuestionSchema = z.object({
-  questionBankId: z.string().uuid(),
   subjectId: z.string().uuid(),
-  topicId: z.string().uuid().optional().nullable(),
   type: z.enum([
     "mcq_single",
     "mcq_multiple",
@@ -29,14 +27,10 @@ const createQuestionSchema = z.object({
     "numerical",
     "matrix_match",
   ]),
-  difficulty: z.enum(["easy", "medium", "hard", "very_hard"]).default("medium"),
   cognitiveLevel: z
     .enum(["remember", "understand", "apply", "analyze", "evaluate", "create"])
     .optional()
     .nullable(),
-  marks: z.coerce.number().min(0).max(9999.99),
-  negativeMarks: z.coerce.number().min(0).max(9999.99).default(0),
-  estimatedTimeSecs: z.number().int().min(1).optional().nullable(),
   content: z.object({
     text: z.string().min(1),
     latex: z.string().optional().nullable(),
@@ -68,13 +62,9 @@ const updateQuestionSchema = createQuestionSchema.partial();
 const listQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
-  questionBankId: z.string().uuid().optional(),
   subjectId: z.string().uuid().optional(),
-  topicId: z.string().uuid().optional(),
   type: z.string().optional(),
-  difficulty: z.string().optional(),
   isActive: z.coerce.boolean().optional(),
-  isApproved: z.coerce.boolean().optional(),
   search: z.string().optional(),
 });
 
@@ -85,35 +75,14 @@ const questionsRoutes: FastifyPluginAsync = async (app) => {
     async (request) => {
       const parsed = listQuerySchema.safeParse(request.query);
       if (!parsed.success) return { error: "Invalid query parameters" };
-      const {
-        page,
-        pageSize,
-        questionBankId,
-        subjectId,
-        topicId,
-        type,
-        difficulty,
-        isActive,
-        isApproved,
-        search,
-      } = parsed.data;
+      const { page, pageSize, subjectId, type, isActive, search } = parsed.data;
       const offset = (page - 1) * pageSize;
 
       const conditions: ReturnType<typeof eq>[] = [];
-      if (questionBankId)
-        conditions.push(eq(questions.questionBankId, questionBankId));
       if (subjectId) conditions.push(eq(questions.subjectId, subjectId));
-      if (topicId) conditions.push(eq(questions.topicId, topicId));
       if (type) conditions.push(eq(questions.type, type as never));
-      if (difficulty)
-        conditions.push(eq(questions.difficulty, difficulty as never));
       if (isActive !== undefined)
         conditions.push(eq(questions.isActive, isActive));
-      if (isApproved !== undefined) {
-        if (isApproved)
-          conditions.push(sql`${questions.approvedBy} IS NOT NULL`);
-        else conditions.push(sql`${questions.approvedBy} IS NULL`);
-      }
       if (search)
         conditions.push(
           ilike(sql`CAST(${questions.contentJson} AS TEXT)`, `%${search}%`),
@@ -144,7 +113,47 @@ const questionsRoutes: FastifyPluginAsync = async (app) => {
           : db.select({ count: sql<number>`count(*)::int` }).from(questions),
       ]);
 
-      return { data: rows, total: count, page, pageSize };
+      // Fetch options and tags for each question
+      const questionIds = rows.map((r) => r.id);
+      const [allOptions, allTags] =
+        questionIds.length > 0
+          ? await Promise.all([
+              db
+                .select()
+                .from(questionOptions)
+                .where(
+                  sql`${questionOptions.questionId} = ANY(${sql.raw(`ARRAY['${questionIds.join("','")}']::uuid[]`)})`,
+                )
+                .orderBy(asc(questionOptions.displayOrder)),
+              db
+                .select()
+                .from(questionTags)
+                .where(
+                  sql`${questionTags.questionId} = ANY(${sql.raw(`ARRAY['${questionIds.join("','")}']::uuid[]`)})`,
+                ),
+            ])
+          : [[], []];
+
+      const optionsMap = new Map<string, typeof allOptions>();
+      for (const opt of allOptions) {
+        const arr = optionsMap.get(opt.questionId) ?? [];
+        arr.push(opt);
+        optionsMap.set(opt.questionId, arr);
+      }
+      const tagsMap = new Map<string, string[]>();
+      for (const t of allTags) {
+        const arr = tagsMap.get(t.questionId) ?? [];
+        arr.push(t.tag);
+        tagsMap.set(t.questionId, arr);
+      }
+
+      const data = rows.map((r) => ({
+        ...r,
+        options: optionsMap.get(r.id) ?? [],
+        tags: tagsMap.get(r.id) ?? [],
+      }));
+
+      return { data, total: count, page, pageSize };
     },
   );
 
@@ -200,8 +209,6 @@ const questionsRoutes: FastifyPluginAsync = async (app) => {
         .insert(questions)
         .values({
           ...questionData,
-          marks: String(body.marks),
-          negativeMarks: String(body.negativeMarks),
           contentJson: content,
           mediaUrlsJson: mediaUrls.length > 0 ? mediaUrls : null,
           solutionJson: solution ?? null,
@@ -370,27 +377,6 @@ const questionsRoutes: FastifyPluginAsync = async (app) => {
       if (!updated)
         return reply.code(404).send({ error: "Question not found" });
       return { message: "Question deactivated" };
-    },
-  );
-
-  app.post(
-    "/:id/approve",
-    { preHandler: requireRole("super_admin", "exam_admin") },
-    async (request, reply) => {
-      const id = (request.params as { id: string }).id;
-
-      const [approved] = await db
-        .update(questions)
-        .set({
-          approvedBy: request.user.sub,
-          approvedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(questions.id, id))
-        .returning();
-      if (!approved)
-        return reply.code(404).send({ error: "Question not found" });
-      return approved;
     },
   );
 

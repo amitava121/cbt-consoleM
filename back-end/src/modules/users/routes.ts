@@ -1,4 +1,4 @@
-import { desc, eq, ilike, sql } from "drizzle-orm";
+import { desc, eq, ilike, ne, sql } from "drizzle-orm";
 import { type FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { db } from "../../database/db.js";
@@ -40,6 +40,7 @@ const listQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(10),
   search: z.string().optional(),
   role: z.string().optional(),
+  excludeRole: z.string().optional(),
 });
 
 const usersRoutes: FastifyPluginAsync = async (app) => {
@@ -50,7 +51,7 @@ const usersRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success) {
       return { error: "Invalid query parameters" };
     }
-    const { page, pageSize, search, role } = parsed.data;
+    const { page, pageSize, search, role, excludeRole } = parsed.data;
     const offset = (page - 1) * pageSize;
 
     const conditions = [];
@@ -62,6 +63,11 @@ const usersRoutes: FastifyPluginAsync = async (app) => {
     if (role) {
       conditions.push(
         eq(users.role, role as (typeof users.role.enumValues)[number]),
+      );
+    }
+    if (excludeRole) {
+      conditions.push(
+        ne(users.role, excludeRole as (typeof users.role.enumValues)[number]),
       );
     }
 

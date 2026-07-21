@@ -1,12 +1,21 @@
-import type { PaginatedResponse, Subject, Topic } from "../types/index.js";
+import type { PaginatedResponse, Subject } from "../types/index.js";
 import api from "./api.js";
 
 export const subjectsService = {
-  list: (params?: { page?: number; pageSize?: number; search?: string }) =>
-    api.get<unknown, PaginatedResponse<Subject>>("/subjects", { params }),
+  list: (params?: {
+    page?: number;
+    pageSize?: number;
+    search?: string;
+    institutionId?: string;
+    batchId?: string;
+  }) => api.get<unknown, PaginatedResponse<Subject>>("/subjects", { params }),
 
-  create: (data: { name: string; code: string; description?: string }) =>
-    api.post<unknown, Subject>("/subjects", data),
+  create: (data: {
+    institutionId: string;
+    name: string;
+    code: string;
+    description?: string;
+  }) => api.post<unknown, Subject>("/subjects", data),
 
   update: (
     id: string,
@@ -18,27 +27,19 @@ export const subjectsService = {
     }>,
   ) => api.put<unknown, Subject>(`/subjects/${id}`, data),
 
-  getTopics: (subjectId: string) =>
-    api.get<unknown, { data: Topic[]; total: number }>(
-      `/subjects/${subjectId}/topics`,
+  getBatchSubjects: (batchId: string) =>
+    api.get<unknown, { data: Subject[]; total: number }>(
+      `/subjects/batch/${batchId}`,
     ),
-};
 
-export const topicsService = {
-  create: (data: {
-    subjectId: string;
-    name: string;
-    description?: string;
-    parentTopicId?: string | null;
-  }) => api.post<unknown, Topic>("/topics", data),
+  addBatchSubjects: (batchId: string, subjectIds: string[]) =>
+    api.post<unknown, { added: number }>(`/subjects/batch/${batchId}`, {
+      subjectIds,
+    }),
 
-  update: (
-    id: string,
-    data: Partial<{
-      name: string;
-      description: string;
-      parentTopicId: string | null;
-      isActive: boolean;
-    }>,
-  ) => api.put<unknown, Topic>(`/topics/${id}`, data),
+  removeBatchSubject: (batchId: string, subjectId: string) =>
+    api.delete(`/subjects/batch/${batchId}/${subjectId}`),
+
+  permanentDelete: (id: string) =>
+    api.delete<unknown, { message: string }>(`/subjects/${id}/permanent`),
 };

@@ -1,52 +1,58 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  flexRender,
-  getCoreRowModel,
-  getSortedRowModel,
-  useReactTable,
-  type ColumnDef,
-  type SortingState,
+    flexRender,
+    getCoreRowModel,
+    getSortedRowModel,
+    useReactTable,
+    type ColumnDef,
+    type SortingState,
 } from "@tanstack/react-table";
 import {
-  ChevronLeft,
-  ChevronRight,
-  Loader2,
-  Monitor,
-  Plus,
-  Power,
-  PowerOff,
-  Search,
+    ChevronLeft,
+    ChevronRight,
+    Loader2,
+    Monitor,
+    Plus,
+    Power,
+    PowerOff,
+    RefreshCw,
+    Search,
+    Trash2,
+    Wifi,
+    WifiOff,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
+    Dialog,
+    DialogContent,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
 } from "../components/ui/dialog";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
 } from "../components/ui/table";
-import { centersService } from "../services/organization";
 import { deviceService } from "../services/devices";
-import type { DeviceListItem, DeviceStatus } from "../types";
+import type { DeviceListItem, DeviceStatus, OnlineDevice } from "../types";
 
-const STATUS_COLORS: Record<DeviceStatus, string> = {
-  registered: "bg-blue-100 text-blue-700",
-  active: "bg-green-100 text-green-700",
-  suspended: "bg-red-100 text-red-700",
-  decommissioned: "bg-gray-200 text-gray-500",
+const STATUS_VARIANTS: Record<
+  DeviceStatus,
+  "info" | "success" | "destructive" | "secondary"
+> = {
+  registered: "info",
+  active: "success",
+  suspended: "destructive",
+  decommissioned: "secondary",
 };
 
 interface RegisterFormState {
@@ -55,7 +61,6 @@ interface RegisterFormState {
   macAddress: string;
   hardwareHash: string;
   ipAddress: string;
-  centerId: string;
 }
 
 const emptyForm: RegisterFormState = {
@@ -64,7 +69,6 @@ const emptyForm: RegisterFormState = {
   macAddress: "",
   hardwareHash: "",
   ipAddress: "",
-  centerId: "",
 };
 
 export default function DevicesPage() {
@@ -82,12 +86,16 @@ export default function DevicesPage() {
       deviceService.list({ page, pageSize, search: search || undefined }),
   });
 
-  const { data: centersData } = useQuery({
-    queryKey: ["centers-list"],
-    queryFn: () => centersService.list({ pageSize: 100 }),
+  const { data: onlineData } = useQuery({
+    queryKey: ["devices-online"],
+    queryFn: () => deviceService.getOnline(),
   });
 
-  const centers = centersData?.data ?? [];
+  const onlineDeviceIds = useMemo(() => {
+    const set = new Set<string>();
+    onlineData?.data?.forEach((d: OnlineDevice) => set.add(d.deviceId));
+    return set;
+  }, [onlineData]);
 
   const registerMutation = useMutation({
     mutationFn: (data: RegisterFormState) =>
@@ -97,7 +105,6 @@ export default function DevicesPage() {
         macAddress: data.macAddress,
         hardwareHash: data.hardwareHash,
         ipAddress: data.ipAddress || undefined,
-        centerId: data.centerId || null,
       }),
     onSuccess: () => {
       toast.success("Device registered successfully");
@@ -132,6 +139,18 @@ export default function DevicesPage() {
     },
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deviceService.remove(id),
+    onSuccess: () => {
+      toast.success("Device deleted");
+      queryClient.invalidateQueries({ queryKey: ["devices"] });
+      queryClient.invalidateQueries({ queryKey: ["devices-online"] });
+    },
+    onError: (err: { response?: { data?: { error?: string } } }) => {
+      toast.error(err.response?.data?.error ?? "Failed to delete device");
+    },
+  });
+
   const columns = useMemo<ColumnDef<DeviceListItem>[]>(
     () => [
       {
@@ -156,24 +175,81 @@ export default function DevicesPage() {
         ),
       },
       {
+        accessorKey: "hardwareHash",
+        header: "Hardware Hash",
+        cell: ({ row }) => (
+          <span
+            className="block max-w-[200px] overflow-x-auto whitespace-nowrap font-mono text-xs text-muted-foreground"
+            title={row.original.hardwareHash}
+          >
+            {row.original.hardwareHash}
+          </span>
+        ),
+      },
+      {
         accessorKey: "ipAddress",
         header: "IP Address",
         cell: ({ row }) => row.original.ipAddress ?? "—",
       },
       {
-        accessorKey: "centerName",
-        header: "Center",
-        cell: ({ row }) => row.original.centerName ?? "—",
+        accessorKey: "clientVersion",
+        header: "Client Ver",
+        cell: ({ row }) => (
+          <span className="text-xs text-muted-foreground">
+            {row.original.clientVersion ?? "—"}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "lastSeenAt",
+        header: "Last Seen",
+        cell: ({ row }) => (
+          <span className="text-xs text-muted-foreground">
+            {row.original.lastSeenAt
+              ? new Date(row.original.lastSeenAt).toLocaleTimeString()
+              : "Never"}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "createdAt",
+        header: "Registered",
+        cell: ({ row }) => (
+          <span className="text-xs text-muted-foreground">
+            {new Date(row.original.createdAt).toLocaleDateString()}
+          </span>
+        ),
       },
       {
         accessorKey: "status",
         header: "Status",
-        cell: ({ row }) => (
-          <Badge className={STATUS_COLORS[row.original.status]}>
-            {row.original.status}
-          </Badge>
-        ),
+        cell: ({ row }) => {
+          const device = row.original;
+          const isOnline = onlineDeviceIds.has(device.deviceId);
+          return (
+            <div className="flex items-center gap-2">
+              <Badge
+                variant={STATUS_VARIANTS[device.status] ?? "secondary"}
+                className="capitalize"
+              >
+                {device.status}
+              </Badge>
+              {isOnline ? (
+                <Badge variant="success" className="gap-1">
+                  <Wifi className="h-3 w-3" />
+                  Online
+                </Badge>
+              ) : (
+                <Badge variant="secondary" className="gap-1">
+                  <WifiOff className="h-3 w-3" />
+                  Offline
+                </Badge>
+              )}
+            </div>
+          );
+        },
       },
+
       {
         id: "actions",
         header: "Actions",
@@ -181,35 +257,67 @@ export default function DevicesPage() {
           const device = row.original;
           if (device.status === "suspended") {
             return (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={activateMutation.isPending}
-                onClick={() => activateMutation.mutate(device.id)}
-              >
-                <Power className="mr-1 h-3 w-3" />
-                Activate
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={activateMutation.isPending}
+                  onClick={() => activateMutation.mutate(device.id)}
+                >
+                  <Power className="mr-1 h-3 w-3" />
+                  Activate
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-destructive hover:text-destructive"
+                  disabled={deleteMutation.isPending}
+                  onClick={() => deleteMutation.mutate(device.id)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
             );
           }
           if (device.status === "active" || device.status === "registered") {
             return (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={suspendMutation.isPending}
-                onClick={() => suspendMutation.mutate(device.id)}
-              >
-                <PowerOff className="mr-1 h-3 w-3" />
-                Suspend
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={suspendMutation.isPending}
+                  onClick={() => suspendMutation.mutate(device.id)}
+                >
+                  <PowerOff className="mr-1 h-3 w-3" />
+                  Suspend
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-destructive hover:text-destructive"
+                  disabled={deleteMutation.isPending}
+                  onClick={() => deleteMutation.mutate(device.id)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
             );
           }
-          return null;
+          return (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-destructive hover:text-destructive"
+              disabled={deleteMutation.isPending}
+              onClick={() => deleteMutation.mutate(device.id)}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          );
         },
       },
     ],
-    [activateMutation, suspendMutation],
+    [activateMutation, suspendMutation, deleteMutation],
   );
 
   const table = useReactTable({
@@ -224,33 +332,44 @@ export default function DevicesPage() {
   const totalPages = data ? Math.ceil(data.total / pageSize) : 1;
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Devices</h1>
-          <p className="text-sm text-muted-foreground">
-            Register and manage exam client devices
-          </p>
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search by device ID, name, MAC..."
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+              className="pl-9 h-9 text-xs"
+            />
+          </div>
+          {onlineData && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Wifi className="h-4 w-4 text-green-500" />
+              <span>{onlineData.total} online</span>
+            </div>
+          )}
         </div>
-        <Button onClick={() => setRegisterOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          Register Device
-        </Button>
-      </div>
-
-      {/* Search */}
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Search by device ID, name, MAC..."
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setPage(1);
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              queryClient.invalidateQueries({ queryKey: ["devices"] });
+              queryClient.invalidateQueries({ queryKey: ["devices-online"] });
             }}
-            className="pl-9"
-          />
+          >
+            <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+            Refresh
+          </Button>
+          <Button size="sm" onClick={() => setRegisterOpen(true)}>
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
+            Register Device
+          </Button>
         </div>
       </div>
 
@@ -274,13 +393,19 @@ export default function DevicesPage() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={columns.length} className="h-24 text-center">
+                <TableCell
+                  colSpan={columns.length}
+                  className="h-24 text-center"
+                >
                   <Loader2 className="mx-auto h-6 w-6 animate-spin" />
                 </TableCell>
               </TableRow>
             ) : table.getRowModel().rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={columns.length} className="h-24 text-center text-muted-foreground">
+                <TableCell
+                  colSpan={columns.length}
+                  className="h-24 text-center text-muted-foreground"
+                >
                   No devices registered.
                 </TableCell>
               </TableRow>
@@ -289,7 +414,10 @@ export default function DevicesPage() {
                 <TableRow key={row.id}>
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      {flexRender(
+                        cell.column.columnDef.cell,
+                        cell.getContext(),
+                      )}
                     </TableCell>
                   ))}
                 </TableRow>
@@ -303,7 +431,8 @@ export default function DevicesPage() {
       {data && data.total > 0 && (
         <div className="flex items-center justify-between">
           <p className="text-sm text-muted-foreground">
-            Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, data.total)} of {data.total}
+            Showing {(page - 1) * pageSize + 1}–
+            {Math.min(page * pageSize, data.total)} of {data.total}
           </p>
           <div className="flex items-center gap-2">
             <Button
@@ -353,7 +482,9 @@ export default function DevicesPage() {
                 id="dev-name"
                 placeholder="e.g. Lab1-PC01"
                 value={form.deviceName}
-                onChange={(e) => setForm({ ...form, deviceName: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, deviceName: e.target.value })
+                }
               />
             </div>
             <div className="space-y-2">
@@ -362,7 +493,9 @@ export default function DevicesPage() {
                 id="dev-mac"
                 placeholder="AA:BB:CC:DD:EE:FF"
                 value={form.macAddress}
-                onChange={(e) => setForm({ ...form, macAddress: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, macAddress: e.target.value })
+                }
               />
               <p className="text-xs text-muted-foreground">
                 Format: XX:XX:XX:XX:XX:XX
@@ -374,7 +507,9 @@ export default function DevicesPage() {
                 id="dev-hash"
                 placeholder="Hardware fingerprint hash"
                 value={form.hardwareHash}
-                onChange={(e) => setForm({ ...form, hardwareHash: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, hardwareHash: e.target.value })
+                }
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -384,24 +519,10 @@ export default function DevicesPage() {
                   id="dev-ip"
                   placeholder="192.168.1.100"
                   value={form.ipAddress}
-                  onChange={(e) => setForm({ ...form, ipAddress: e.target.value })}
+                  onChange={(e) =>
+                    setForm({ ...form, ipAddress: e.target.value })
+                  }
                 />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="dev-center">Center</Label>
-                <select
-                  id="dev-center"
-                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
-                  value={form.centerId}
-                  onChange={(e) => setForm({ ...form, centerId: e.target.value })}
-                >
-                  <option value="">No center</option>
-                  {centers.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
               </div>
             </div>
           </div>

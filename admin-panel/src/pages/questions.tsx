@@ -1,53 +1,56 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-    flexRender,
-    getCoreRowModel,
-    getPaginationRowModel,
-    getSortedRowModel,
-    useReactTable,
-    type ColumnDef,
-    type SortingState,
+  flexRender,
+  getCoreRowModel,
+  getPaginationRowModel,
+  getSortedRowModel,
+  useReactTable,
+  type ColumnDef,
+  type SortingState,
 } from "@tanstack/react-table";
 import {
-    CheckCircle2,
-    ChevronLeft,
-    ChevronRight,
-    Download,
-    Loader2,
-    Plus,
-    Search,
-    Trash2,
-    Upload,
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardList,
+  Download,
+  Loader2,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import {
-    Dialog,
-    DialogContent,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "../components/ui/dialog";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "../components/ui/table";
-import { questionBanksService } from "../services/question-banks";
+import { examsService } from "../services/exams";
 import { questionsService } from "../services/questions";
 import { subjectsService } from "../services/subjects";
 import type {
-    CreateQuestionInput,
-    DifficultyLevel,
-    Question,
-    QuestionType,
+  CreateExamInput,
+  CreateQuestionInput,
+  NavigationMode,
+  Question,
+  QuestionType,
+  SelectionStrategy,
 } from "../types";
 
 const QUESTION_TYPES: { value: QuestionType; label: string }[] = [
@@ -66,25 +69,21 @@ const QUESTION_TYPES: { value: QuestionType; label: string }[] = [
   { value: "matrix_match", label: "Matrix Match" },
 ];
 
-const DIFFICULTIES: { value: DifficultyLevel; label: string }[] = [
-  { value: "easy", label: "Easy" },
-  { value: "medium", label: "Medium" },
-  { value: "hard", label: "Hard" },
-  { value: "very_hard", label: "Very Hard" },
-];
-
-const difficultyColors: Record<DifficultyLevel, string> = {
-  easy: "bg-green-100 text-green-800",
-  medium: "bg-yellow-100 text-yellow-800",
-  hard: "bg-orange-100 text-orange-800",
-  very_hard: "bg-red-100 text-red-800",
-};
-
 const typeLabels: Record<QuestionType, string> = Object.fromEntries(
   QUESTION_TYPES.map((t) => [t.value, t.label]),
 ) as Record<QuestionType, string>;
 
-export default function QuestionsPage() {
+export default function QuestionsPage({
+  subjectId: propSubjectId,
+  batchId,
+  hideHeader: _hideHeader,
+  onBack,
+}: {
+  subjectId?: string;
+  batchId?: string;
+  hideHeader?: boolean;
+  onBack?: () => void;
+}) {
   const queryClient = useQueryClient();
   const [sorting, setSorting] = useState<SortingState>([]);
   const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: 10 });
@@ -96,41 +95,47 @@ export default function QuestionsPage() {
     return () => clearTimeout(timer);
   }, [search]);
   const [filters, setFilters] = useState({
-    questionBankId: "",
-    subjectId: "",
+    subjectId: propSubjectId || "",
     type: "",
-    difficulty: "",
-    isApproved: "",
   });
+  useEffect(() => {
+    if (propSubjectId) {
+      setCreateForm((f) => ({ ...f, subjectId: propSubjectId }));
+      setImportSubjectId(propSubjectId);
+    }
+  }, [propSubjectId]);
   const [createOpen, setCreateOpen] = useState(false);
+  const [createExamOpen, setCreateExamOpen] = useState(false);
+  const [examForm, setExamForm] = useState({
+    name: "",
+    code: "",
+    description: "",
+    durationMinutes: "180",
+    totalMarks: "100",
+    selectionStrategy: "static" as SelectionStrategy,
+    navigationMode: "free" as NavigationMode,
+    shuffleQuestions: false,
+    shuffleOptions: false,
+    scheduledStartDate: "",
+    scheduledStartTime: "",
+  });
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [templateMenuOpen, setTemplateMenuOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
-  const [importBankId, setImportBankId] = useState("");
-  const [importSubjectId, setImportSubjectId] = useState("");
-  const [exportOpen, setExportOpen] = useState(false);
+  const [importSubjectId, setImportSubjectId] = useState(propSubjectId || "");
   const [createForm, setCreateForm] = useState({
-    questionBankId: "",
-    subjectId: "",
-    topicId: "",
+    subjectId: propSubjectId || "",
     type: "mcq_single" as QuestionType,
-    difficulty: "medium" as DifficultyLevel,
-    marks: "4",
-    negativeMarks: "1",
-    estimatedTimeSecs: "120",
     contentText: "",
     option1: "",
     option2: "",
     option3: "",
     option4: "",
     correctOption: "1",
+    correctOptions: [] as string[],
     solutionText: "",
     tags: "",
-  });
-
-  const { data: banksData } = useQuery({
-    queryKey: ["question-banks", "all"],
-    queryFn: () => questionBanksService.list({ page: 1, pageSize: 100 }),
-    staleTime: 5 * 60 * 1000,
   });
 
   const { data: subjectsData } = useQuery({
@@ -152,12 +157,8 @@ export default function QuestionsPage() {
         page: pagination.pageIndex + 1,
         pageSize: pagination.pageSize,
         search: debouncedSearch || undefined,
-        questionBankId: filters.questionBankId || undefined,
         subjectId: filters.subjectId || undefined,
         type: filters.type || undefined,
-        difficulty: filters.difficulty || undefined,
-        isApproved:
-          filters.isApproved === "" ? undefined : filters.isApproved === "true",
       }),
     placeholderData: (prev) => prev,
   });
@@ -166,16 +167,8 @@ export default function QuestionsPage() {
     mutationFn: () => {
       const f = createForm;
       const input: CreateQuestionInput = {
-        questionBankId: f.questionBankId,
         subjectId: f.subjectId,
-        topicId: f.topicId || undefined,
         type: f.type,
-        difficulty: f.difficulty,
-        marks: parseFloat(f.marks) || 0,
-        negativeMarks: parseFloat(f.negativeMarks) || 0,
-        estimatedTimeSecs: f.estimatedTimeSecs
-          ? parseInt(f.estimatedTimeSecs)
-          : undefined,
         content: { text: f.contentText },
         tags: f.tags
           ? f.tags
@@ -189,12 +182,37 @@ export default function QuestionsPage() {
         f.type === "mcq_multiple" ||
         f.type === "true_false"
       ) {
+        const isMultiple = f.type === "mcq_multiple";
         const correctIdx = parseInt(f.correctOption);
         input.options = [
-          { text: f.option1, isCorrect: correctIdx === 1, displayOrder: 1 },
-          { text: f.option2, isCorrect: correctIdx === 2, displayOrder: 2 },
-          { text: f.option3, isCorrect: correctIdx === 3, displayOrder: 3 },
-          { text: f.option4, isCorrect: correctIdx === 4, displayOrder: 4 },
+          {
+            text: f.option1,
+            isCorrect: isMultiple
+              ? f.correctOptions.includes("1")
+              : correctIdx === 1,
+            displayOrder: 1,
+          },
+          {
+            text: f.option2,
+            isCorrect: isMultiple
+              ? f.correctOptions.includes("2")
+              : correctIdx === 2,
+            displayOrder: 2,
+          },
+          {
+            text: f.option3,
+            isCorrect: isMultiple
+              ? f.correctOptions.includes("3")
+              : correctIdx === 3,
+            displayOrder: 3,
+          },
+          {
+            text: f.option4,
+            isCorrect: isMultiple
+              ? f.correctOptions.includes("4")
+              : correctIdx === 4,
+            displayOrder: 4,
+          },
         ].filter((o) => o.text);
       }
       if (f.solutionText) {
@@ -210,13 +228,49 @@ export default function QuestionsPage() {
     onError: () => toast.error("Failed to create question"),
   });
 
-  const approveMutation = useMutation({
-    mutationFn: (id: string) => questionsService.approve(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["questions"] });
-      toast.success("Question approved");
+  const createExamMutation = useMutation({
+    mutationFn: async () => {
+      const selectedSubjectId = filters.subjectId || propSubjectId || "";
+      const input: CreateExamInput = {
+        subjectId: selectedSubjectId || undefined,
+        batchId: batchId || undefined,
+        name: examForm.name,
+        code: examForm.code,
+        description: examForm.description || undefined,
+        durationMinutes: parseInt(examForm.durationMinutes) || 60,
+        totalMarks: parseFloat(examForm.totalMarks) || 0,
+        selectionStrategy: examForm.selectionStrategy,
+        navigationMode: examForm.navigationMode,
+        shuffleQuestions: examForm.shuffleQuestions,
+        shuffleOptions: examForm.shuffleOptions,
+        scheduledStartAt:
+          examForm.scheduledStartDate && examForm.scheduledStartTime
+            ? new Date(
+                `${examForm.scheduledStartDate}T${examForm.scheduledStartTime}`,
+              ).toISOString()
+            : undefined,
+      };
+      return examsService.create(input);
     },
-    onError: () => toast.error("Failed to approve question"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["exams"] });
+      toast.success("Exam created successfully");
+      setCreateExamOpen(false);
+      setExamForm({
+        name: "",
+        code: "",
+        description: "",
+        durationMinutes: "180",
+        totalMarks: "100",
+        selectionStrategy: "static" as SelectionStrategy,
+        navigationMode: "free" as NavigationMode,
+        shuffleQuestions: false,
+        shuffleOptions: false,
+        scheduledStartDate: "",
+        scheduledStartTime: "",
+      });
+    },
+    onError: () => toast.error("Failed to create exam"),
   });
 
   const deactivateMutation = useMutation({
@@ -228,40 +282,120 @@ export default function QuestionsPage() {
     onError: () => toast.error("Failed to deactivate question"),
   });
 
-  const exportMutation = useMutation({
-    mutationFn: (format: "json" | "excel" | "pdf") =>
-      questionsService.export({
-        format,
-        questionBankId: filters.questionBankId || undefined,
-        subjectId: filters.subjectId || undefined,
-        type: filters.type || undefined,
-        difficulty: filters.difficulty || undefined,
-        search: debouncedSearch || undefined,
-      }),
-    onSuccess: (blob) => {
-      const ext =
-        exportMutation.variables === "json"
-          ? "json"
-          : exportMutation.variables === "excel"
-            ? "xlsx"
-            : "pdf";
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `questions-export-${Date.now()}.${ext}`;
-      a.click();
-      URL.revokeObjectURL(url);
-      setExportOpen(false);
-      toast.success(`Exported as ${ext.toUpperCase()}`);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editForm, setEditForm] = useState({
+    id: "",
+    type: "mcq_single" as QuestionType,
+    contentText: "",
+    option1: "",
+    option2: "",
+    option3: "",
+    option4: "",
+    correctOption: "1",
+    correctOptions: [] as string[],
+    solutionText: "",
+    tags: "",
+  });
+
+  // Bulk Delete States
+  const [rowSelection, setRowSelection] = useState({});
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
+
+  const openEditDialog = (q: Question) => {
+    const content = q.contentJson as Record<string, unknown>;
+    const text = (content?.text as string) ?? "";
+    const solution = q.solutionJson as Record<string, unknown> | null;
+    const solutionText = (solution?.text as string) ?? "";
+    const opts = q.options ?? [];
+    const correctOpts = opts.filter((o) => o.isCorrect);
+    setEditForm({
+      id: q.id,
+      type: q.type,
+      contentText: text,
+      option1: opts[0]?.optionText ?? "",
+      option2: opts[1]?.optionText ?? "",
+      option3: opts[2]?.optionText ?? "",
+      option4: opts[3]?.optionText ?? "",
+      correctOption: correctOpts[0] ? String(correctOpts[0].displayOrder) : "1",
+      correctOptions: correctOpts.map((o) => String(o.displayOrder)),
+      solutionText,
+      tags: (q.tags ?? []).join(", "),
+    });
+    setEditOpen(true);
+  };
+
+  const editMutation = useMutation({
+    mutationFn: () => {
+      const f = editForm;
+      const input: Partial<CreateQuestionInput> = {
+        type: f.type,
+        content: { text: f.contentText },
+        tags: f.tags
+          ? f.tags
+              .split(",")
+              .map((t) => t.trim())
+              .filter(Boolean)
+          : [],
+      };
+      if (
+        f.type === "mcq_single" ||
+        f.type === "mcq_multiple" ||
+        f.type === "true_false"
+      ) {
+        const isMultiple = f.type === "mcq_multiple";
+        input.options = [
+          {
+            text: f.option1,
+            isCorrect: isMultiple
+              ? f.correctOptions.includes("1")
+              : f.correctOption === "1",
+            displayOrder: 1,
+          },
+          {
+            text: f.option2,
+            isCorrect: isMultiple
+              ? f.correctOptions.includes("2")
+              : f.correctOption === "2",
+            displayOrder: 2,
+          },
+          {
+            text: f.option3,
+            isCorrect: isMultiple
+              ? f.correctOptions.includes("3")
+              : f.correctOption === "3",
+            displayOrder: 3,
+          },
+          {
+            text: f.option4,
+            isCorrect: isMultiple
+              ? f.correctOptions.includes("4")
+              : f.correctOption === "4",
+            displayOrder: 4,
+          },
+        ].filter((o) => o.text);
+      }
+      if (f.solutionText) {
+        input.solution = { text: f.solutionText };
+      }
+      return questionsService.update(f.id, input);
     },
-    onError: () => toast.error("Export failed"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["questions"] });
+      toast.success("Question updated successfully");
+      setEditOpen(false);
+    },
+    onError: () => toast.error("Failed to update question"),
   });
 
   const importMutation = useMutation({
     mutationFn: () => {
-      if (!importFile || !importBankId || !importSubjectId)
-        throw new Error("Missing file, bank, or subject");
-      return questionsService.import(importFile, importBankId, importSubjectId);
+      if (!importFile || !importSubjectId)
+        throw new Error("Missing file or subject");
+      if (importFile.name.toLowerCase().endsWith(".zip")) {
+        return questionsService.importZip(importFile, importSubjectId);
+      }
+      return questionsService.import(importFile, importSubjectId);
     },
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["questions"] });
@@ -281,15 +415,63 @@ export default function QuestionsPage() {
 
   const columns: ColumnDef<Question>[] = [
     {
+      id: "select",
+      header: ({ table }) => (
+        <input
+          type="checkbox"
+          checked={table.getIsAllPageRowsSelected()}
+          onChange={(e) => table.toggleAllPageRowsSelected(!!e.target.checked)}
+          aria-label="Select all"
+          className="h-4 w-4 rounded border-border bg-background accent-primary cursor-pointer"
+        />
+      ),
+      cell: ({ row }) => (
+        <input
+          type="checkbox"
+          checked={row.getIsSelected()}
+          onChange={(e) => row.toggleSelected(!!e.target.checked)}
+          aria-label="Select row"
+          className="h-4 w-4 rounded border-border bg-background accent-primary cursor-pointer"
+          onClick={(e) => e.stopPropagation()}
+        />
+      ),
+      enableSorting: false,
+      enableHiding: false,
+    },
+    {
       accessorKey: "contentJson",
       header: "Question",
       cell: ({ row }) => {
         const content = row.getValue("contentJson") as Record<string, unknown>;
         const text = (content?.text as string) ?? "";
+        const opts = row.original.options ?? [];
+        const showOptions = [
+          "mcq_single",
+          "mcq_multiple",
+          "true_false",
+        ].includes(row.original.type);
         return (
-          <span className="max-w-md truncate font-medium">
-            {text.length > 80 ? text.slice(0, 80) + "…" : text}
-          </span>
+          <div className="max-w-md space-y-1">
+            <p className="font-medium">
+              {text.length > 80 ? text.slice(0, 80) + "…" : text}
+            </p>
+            {showOptions && opts.length > 0 && (
+              <ul className="ml-4 space-y-0.5 text-xs text-muted-foreground">
+                {opts.map((o, i) => (
+                  <li
+                    key={i}
+                    className={
+                      o.isCorrect
+                        ? "text-green-600 dark:text-green-400 font-medium"
+                        : ""
+                    }
+                  >
+                    {String.fromCharCode(65 + i)}) {o.optionText}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         );
       },
     },
@@ -302,48 +484,18 @@ export default function QuestionsPage() {
       },
     },
     {
-      accessorKey: "difficulty",
-      header: "Difficulty",
-      cell: ({ row }) => {
-        const diff = row.getValue("difficulty") as DifficultyLevel;
-        return (
-          <Badge variant="secondary" className={difficultyColors[diff]}>
-            {diff.replace("_", " ")}
-          </Badge>
-        );
-      },
-    },
-    {
-      accessorKey: "marks",
-      header: "Marks",
-      cell: ({ row }) => (
-        <span className="font-mono">{row.getValue("marks")}</span>
-      ),
-    },
-    {
-      id: "approved",
-      header: "Status",
-      cell: ({ row }) => (
-        <Badge variant={row.original.approvedBy ? "default" : "secondary"}>
-          {row.original.approvedBy ? "Approved" : "Pending"}
-        </Badge>
-      ),
-    },
-    {
       id: "actions",
       header: "Actions",
       cell: ({ row }) => (
         <div className="flex gap-1">
-          {!row.original.approvedBy && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => approveMutation.mutate(row.original.id)}
-              title="Approve"
-            >
-              <CheckCircle2 className="h-4 w-4 text-green-600" />
-            </Button>
-          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => openEditDialog(row.original)}
+            title="Edit"
+          >
+            <Pencil className="h-4 w-4" />
+          </Button>
           {row.original.isActive && (
             <Button
               variant="ghost"
@@ -362,9 +514,10 @@ export default function QuestionsPage() {
   const table = useReactTable({
     data: tableData,
     columns,
-    state: { sorting, pagination },
+    state: { sorting, pagination, rowSelection },
     onSortingChange: setSorting,
     onPaginationChange: setPagination,
+    onRowSelectionChange: setRowSelection,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
@@ -372,152 +525,174 @@ export default function QuestionsPage() {
     pageCount: data ? Math.ceil(data.total / data.pageSize) : -1,
   });
 
+  const handleBulkDelete = async () => {
+    const selectedRows = table.getSelectedRowModel().rows;
+    if (selectedRows.length === 0) return;
+    setBulkDeleting(true);
+    try {
+      await Promise.all(
+        selectedRows.map((row) => questionsService.deactivate(row.original.id))
+      );
+      toast.success(`Successfully deactivated ${selectedRows.length} question(s)`);
+      queryClient.invalidateQueries({ queryKey: ["questions"] });
+      setRowSelection({});
+      setBulkDeleteConfirmOpen(false);
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to deactivate some questions");
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   const showOptions = ["mcq_single", "mcq_multiple", "true_false"].includes(
     createForm.type,
   );
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Questions</h1>
-          <p className="text-sm text-muted-foreground">
-            Manage and approve questions across all banks
-          </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3 flex-1">
+          {onBack && (
+            <Button variant="outline" size="sm" onClick={onBack}>
+              <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
+              Back
+            </Button>
+          )}
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search questions..."
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPagination((p) => ({ ...p, pageIndex: 0 }));
+              }}
+              className="pl-9 h-9 text-xs"
+            />
+          </div>
+          {!propSubjectId && (
+            <select
+              value={filters.subjectId}
+              onChange={(e) => {
+                setFilters((f) => ({ ...f, subjectId: e.target.value }));
+                setPagination((p) => ({ ...p, pageIndex: 0 }));
+              }}
+              className="h-9 rounded-md border border-input bg-transparent px-3 text-xs"
+            >
+              <option value="">All Subjects</option>
+              {(subjectsData?.data ?? []).map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name} ({s.code})
+                </option>
+              ))}
+            </select>
+          )}
         </div>
+
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setImportOpen(true)}>
-            <Upload className="mr-2 h-4 w-4" />
-            Import
-          </Button>
+          {table.getSelectedRowModel().rows.length > 0 && (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setBulkDeleteConfirmOpen(true)}
+              className="shadow-sm transition-all animate-in fade-in zoom-in-95 duration-200"
+            >
+              <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+              Deactivate Selected ({table.getSelectedRowModel().rows.length})
+            </Button>
+          )}
           <div className="relative">
             <Button
               variant="outline"
-              onClick={() => setExportOpen((v) => !v)}
-              disabled={exportMutation.isPending}
+              size="sm"
+              onClick={() => setTemplateMenuOpen((v) => !v)}
             >
-              {exportMutation.isPending ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Download className="mr-2 h-4 w-4" />
-              )}
-              Export
+              <Download className="mr-1.5 h-3.5 w-3.5" />
+              Download Template
             </Button>
-            {exportOpen && (
-              <div className="absolute right-0 top-full mt-1 z-10 rounded-md border border-border bg-popover shadow-md w-36">
+            {templateMenuOpen && (
+              <div className="absolute right-0 top-full mt-1 z-10 rounded-md border border-border bg-popover shadow-md w-48">
                 <button
                   className="flex w-full items-center px-3 py-2 text-sm hover:bg-accent"
-                  onClick={() => exportMutation.mutate("json")}
+                  onClick={() => {
+                    setTemplateMenuOpen(false);
+                    questionsService.downloadTemplate().then((blob) => {
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = "question-upload-template.xlsx";
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    });
+                  }}
                 >
-                  JSON
+                  Excel Template (.xlsx)
                 </button>
                 <button
                   className="flex w-full items-center px-3 py-2 text-sm hover:bg-accent"
-                  onClick={() => exportMutation.mutate("excel")}
+                  onClick={() => {
+                    setTemplateMenuOpen(false);
+                    questionsService.downloadZipTemplate().then((blob) => {
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = "question-upload-template.zip";
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    });
+                  }}
                 >
-                  Excel (.xlsx)
-                </button>
-                <button
-                  className="flex w-full items-center px-3 py-2 text-sm hover:bg-accent"
-                  onClick={() => exportMutation.mutate("pdf")}
-                >
-                  PDF
+                  ZIP Template (.zip)
                 </button>
               </div>
             )}
           </div>
-          <Button onClick={() => setCreateOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            Add Question
-          </Button>
+          {batchId && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCreateExamOpen(true)}
+              disabled={!filters.subjectId && !propSubjectId}
+              title={
+                !filters.subjectId && !propSubjectId
+                  ? "Select a subject first"
+                  : "Create exam (question paper) from this subject"
+              }
+            >
+              <ClipboardList className="mr-1.5 h-3.5 w-3.5" />
+              Create Exam
+            </Button>
+          )}
+          <div className="relative">
+            <Button size="sm" onClick={() => setAddMenuOpen((v) => !v)}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              Add Question
+            </Button>
+            {addMenuOpen && (
+              <div className="absolute right-0 top-full mt-1 z-10 rounded-md border border-border bg-popover shadow-md w-44">
+                <button
+                  className="flex w-full items-center px-3 py-2 text-sm hover:bg-accent"
+                  onClick={() => {
+                    setAddMenuOpen(false);
+                    setCreateOpen(true);
+                  }}
+                >
+                  Single Upload
+                </button>
+                <button
+                  className="flex w-full items-center px-3 py-2 text-sm hover:bg-accent"
+                  onClick={() => {
+                    setAddMenuOpen(false);
+                    setImportOpen(true);
+                  }}
+                >
+                  Bulk Upload
+                </button>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search questions..."
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setPagination((p) => ({ ...p, pageIndex: 0 }));
-            }}
-            className="pl-8"
-          />
-        </div>
-        <select
-          value={filters.questionBankId}
-          onChange={(e) => {
-            setFilters((f) => ({ ...f, questionBankId: e.target.value }));
-            setPagination((p) => ({ ...p, pageIndex: 0 }));
-          }}
-          className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
-        >
-          <option value="">All Banks</option>
-          {(banksData?.data ?? []).map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.name}
-            </option>
-          ))}
-        </select>
-        <select
-          value={filters.subjectId}
-          onChange={(e) => {
-            setFilters((f) => ({ ...f, subjectId: e.target.value }));
-            setPagination((p) => ({ ...p, pageIndex: 0 }));
-          }}
-          className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
-        >
-          <option value="">All Subjects</option>
-          {(subjectsData?.data ?? []).map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
-        <select
-          value={filters.type}
-          onChange={(e) => {
-            setFilters((f) => ({ ...f, type: e.target.value }));
-            setPagination((p) => ({ ...p, pageIndex: 0 }));
-          }}
-          className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
-        >
-          <option value="">All Types</option>
-          {QUESTION_TYPES.map((t) => (
-            <option key={t.value} value={t.value}>
-              {t.label}
-            </option>
-          ))}
-        </select>
-        <select
-          value={filters.difficulty}
-          onChange={(e) => {
-            setFilters((f) => ({ ...f, difficulty: e.target.value }));
-            setPagination((p) => ({ ...p, pageIndex: 0 }));
-          }}
-          className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
-        >
-          <option value="">All Difficulties</option>
-          {DIFFICULTIES.map((d) => (
-            <option key={d.value} value={d.value}>
-              {d.label}
-            </option>
-          ))}
-        </select>
-        <select
-          value={filters.isApproved}
-          onChange={(e) => {
-            setFilters((f) => ({ ...f, isApproved: e.target.value }));
-            setPagination((p) => ({ ...p, pageIndex: 0 }));
-          }}
-          className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
-        >
-          <option value="">All Status</option>
-          <option value="true">Approved</option>
-          <option value="false">Pending</option>
-        </select>
       </div>
 
       <div className="rounded-md border border-border">
@@ -609,27 +784,7 @@ export default function QuestionsPage() {
             <DialogTitle>Create Question</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Question Bank</Label>
-                <select
-                  value={createForm.questionBankId}
-                  onChange={(e) =>
-                    setCreateForm((f) => ({
-                      ...f,
-                      questionBankId: e.target.value,
-                    }))
-                  }
-                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
-                >
-                  <option value="">Select bank...</option>
-                  {(banksData?.data ?? []).map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            {!propSubjectId && (
               <div className="space-y-2">
                 <Label>Subject</Label>
                 <select
@@ -647,7 +802,7 @@ export default function QuestionsPage() {
                   ))}
                 </select>
               </div>
-            </div>
+            )}
             <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label>Type</Label>
@@ -668,65 +823,6 @@ export default function QuestionsPage() {
                   ))}
                 </select>
               </div>
-              <div className="space-y-2">
-                <Label>Difficulty</Label>
-                <select
-                  value={createForm.difficulty}
-                  onChange={(e) =>
-                    setCreateForm((f) => ({
-                      ...f,
-                      difficulty: e.target.value as DifficultyLevel,
-                    }))
-                  }
-                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
-                >
-                  {DIFFICULTIES.map((d) => (
-                    <option key={d.value} value={d.value}>
-                      {d.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label>Estimated Time (secs)</Label>
-                <Input
-                  type="number"
-                  value={createForm.estimatedTimeSecs}
-                  onChange={(e) =>
-                    setCreateForm((f) => ({
-                      ...f,
-                      estimatedTimeSecs: e.target.value,
-                    }))
-                  }
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Marks</Label>
-                <Input
-                  type="number"
-                  step="0.5"
-                  value={createForm.marks}
-                  onChange={(e) =>
-                    setCreateForm((f) => ({ ...f, marks: e.target.value }))
-                  }
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Negative Marks</Label>
-                <Input
-                  type="number"
-                  step="0.5"
-                  value={createForm.negativeMarks}
-                  onChange={(e) =>
-                    setCreateForm((f) => ({
-                      ...f,
-                      negativeMarks: e.target.value,
-                    }))
-                  }
-                />
-              </div>
             </div>
             <div className="space-y-2">
               <Label>Question Text</Label>
@@ -742,37 +838,57 @@ export default function QuestionsPage() {
             </div>
             {showOptions && (
               <div className="space-y-2">
-                <Label>Options (select correct answer)</Label>
-                {[1, 2, 3, 4].map((idx) => (
-                  <div key={idx} className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      name="correctOption"
-                      checked={createForm.correctOption === String(idx)}
-                      onChange={() =>
-                        setCreateForm((f) => ({
-                          ...f,
-                          correctOption: String(idx),
-                        }))
-                      }
-                      className="h-4 w-4"
-                    />
-                    <Input
-                      value={
-                        createForm[
-                          `option${idx}` as keyof typeof createForm
-                        ] as string
-                      }
-                      onChange={(e) =>
-                        setCreateForm((f) => ({
-                          ...f,
-                          [`option${idx}`]: e.target.value,
-                        }))
-                      }
-                      placeholder={`Option ${idx}`}
-                    />
-                  </div>
-                ))}
+                <Label>
+                  Options (select correct answer
+                  {createForm.type === "mcq_multiple" ? "s" : ""})
+                </Label>
+                {[1, 2, 3, 4].map((idx) => {
+                  const isMultiple = createForm.type === "mcq_multiple";
+                  const isChecked = isMultiple
+                    ? createForm.correctOptions.includes(String(idx))
+                    : createForm.correctOption === String(idx);
+                  return (
+                    <div key={idx} className="flex items-center gap-2">
+                      <input
+                        type={isMultiple ? "checkbox" : "radio"}
+                        name="correctOption"
+                        checked={isChecked}
+                        onChange={(e) => {
+                          if (isMultiple) {
+                            setCreateForm((f) => ({
+                              ...f,
+                              correctOptions: e.target.checked
+                                ? [...f.correctOptions, String(idx)]
+                                : f.correctOptions.filter(
+                                    (c) => c !== String(idx),
+                                  ),
+                            }));
+                          } else {
+                            setCreateForm((f) => ({
+                              ...f,
+                              correctOption: String(idx),
+                            }));
+                          }
+                        }}
+                        className="h-4 w-4"
+                      />
+                      <Input
+                        value={
+                          createForm[
+                            `option${idx}` as keyof typeof createForm
+                          ] as string
+                        }
+                        onChange={(e) =>
+                          setCreateForm((f) => ({
+                            ...f,
+                            [`option${idx}`]: e.target.value,
+                          }))
+                        }
+                        placeholder={`Option ${idx}`}
+                      />
+                    </div>
+                  );
+                })}
               </div>
             )}
             <div className="space-y-2">
@@ -806,7 +922,6 @@ export default function QuestionsPage() {
               onClick={() => createMutation.mutate()}
               disabled={
                 createMutation.isPending ||
-                !createForm.questionBankId ||
                 !createForm.subjectId ||
                 !createForm.contentText
               }
@@ -817,47 +932,238 @@ export default function QuestionsPage() {
         </DialogContent>
       </Dialog>
 
+      {batchId && (
+        <Dialog open={createExamOpen} onOpenChange={setCreateExamOpen}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Create Exam (Question Paper)</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-4 max-h-[60vh] overflow-y-auto">
+              <div className="space-y-2">
+                <Label>Subject</Label>
+                <p className="text-sm text-muted-foreground">
+                  {(subjectsData?.data ?? []).find(
+                    (s) => s.id === (filters.subjectId || propSubjectId),
+                  )?.name ?? "Select a subject in the filter above"}
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="exam-name">Exam Name</Label>
+                  <Input
+                    id="exam-name"
+                    value={examForm.name}
+                    onChange={(e) =>
+                      setExamForm((f) => ({ ...f, name: e.target.value }))
+                    }
+                    placeholder="e.g. Physics Mock Test 1"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="exam-code">Code</Label>
+                  <Input
+                    id="exam-code"
+                    value={examForm.code}
+                    onChange={(e) =>
+                      setExamForm((f) => ({
+                        ...f,
+                        code: e.target.value.toUpperCase(),
+                      }))
+                    }
+                    placeholder="e.g. PHY-MOCK-1"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="exam-desc">Description (optional)</Label>
+                <Input
+                  id="exam-desc"
+                  value={examForm.description}
+                  onChange={(e) =>
+                    setExamForm((f) => ({ ...f, description: e.target.value }))
+                  }
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="exam-duration">Duration (minutes)</Label>
+                  <Input
+                    id="exam-duration"
+                    type="number"
+                    value={examForm.durationMinutes}
+                    onChange={(e) =>
+                      setExamForm((f) => ({
+                        ...f,
+                        durationMinutes: e.target.value,
+                      }))
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="exam-marks">Total Marks</Label>
+                  <Input
+                    id="exam-marks"
+                    type="number"
+                    step="0.5"
+                    value={examForm.totalMarks}
+                    onChange={(e) =>
+                      setExamForm((f) => ({ ...f, totalMarks: e.target.value }))
+                    }
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="exam-strategy">Selection Strategy</Label>
+                  <select
+                    id="exam-strategy"
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+                    value={examForm.selectionStrategy}
+                    onChange={(e) =>
+                      setExamForm((f) => ({
+                        ...f,
+                        selectionStrategy: e.target.value as SelectionStrategy,
+                      }))
+                    }
+                  >
+                    <option value="static">Static (fixed questions)</option>
+                    <option value="random">Random (from pool)</option>
+                    <option value="hybrid">Hybrid</option>
+                  </select>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="exam-nav">Navigation Mode</Label>
+                <select
+                  id="exam-nav"
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+                  value={examForm.navigationMode}
+                  onChange={(e) =>
+                    setExamForm((f) => ({
+                      ...f,
+                      navigationMode: e.target.value as NavigationMode,
+                    }))
+                  }
+                >
+                  <option value="free">Free (any order)</option>
+                  <option value="linear">Linear (sequential)</option>
+                  <option value="section_free">Section-wise free</option>
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="exam-start-date">Exam Date</Label>
+                  <Input
+                    id="exam-start-date"
+                    type="date"
+                    value={examForm.scheduledStartDate}
+                    onChange={(e) =>
+                      setExamForm((f) => ({
+                        ...f,
+                        scheduledStartDate: e.target.value,
+                      }))
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="exam-start-time">Exam Time</Label>
+                  <Input
+                    id="exam-start-time"
+                    type="time"
+                    value={examForm.scheduledStartTime}
+                    onChange={(e) =>
+                      setExamForm((f) => ({
+                        ...f,
+                        scheduledStartTime: e.target.value,
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                When the exam is scheduled to start (for display purposes only)
+              </p>
+              <div className="flex flex-col gap-2">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={examForm.shuffleQuestions}
+                    onChange={(e) =>
+                      setExamForm((f) => ({
+                        ...f,
+                        shuffleQuestions: e.target.checked,
+                      }))
+                    }
+                    className="h-4 w-4 rounded border-input"
+                  />
+                  Shuffle Questions
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={examForm.shuffleOptions}
+                    onChange={(e) =>
+                      setExamForm((f) => ({
+                        ...f,
+                        shuffleOptions: e.target.checked,
+                      }))
+                    }
+                    className="h-4 w-4 rounded border-input"
+                  />
+                  Shuffle Options
+                </label>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setCreateExamOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => createExamMutation.mutate()}
+                disabled={
+                  createExamMutation.isPending ||
+                  !examForm.name ||
+                  !examForm.code
+                }
+              >
+                {createExamMutation.isPending ? "Creating..." : "Create Exam"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
       <Dialog open={importOpen} onOpenChange={setImportOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Import Questions</DialogTitle>
+            <DialogTitle>Bulk Upload Questions</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
+            {!propSubjectId && (
+              <div className="space-y-2">
+                <Label>Subject</Label>
+                <select
+                  value={importSubjectId}
+                  onChange={(e) => setImportSubjectId(e.target.value)}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+                >
+                  <option value="">Select subject...</option>
+                  {(subjectsData?.data ?? []).map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="space-y-2">
-              <Label>Question Bank</Label>
-              <select
-                value={importBankId}
-                onChange={(e) => setImportBankId(e.target.value)}
-                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
-              >
-                <option value="">Select bank...</option>
-                {(banksData?.data ?? []).map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-2">
-              <Label>Subject</Label>
-              <select
-                value={importSubjectId}
-                onChange={(e) => setImportSubjectId(e.target.value)}
-                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
-              >
-                <option value="">Select subject...</option>
-                {(subjectsData?.data ?? []).map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-2">
-              <Label>File (JSON or Excel .xlsx)</Label>
+              <Label>File (JSON, Excel .xlsx, or ZIP .zip)</Label>
               <input
                 type="file"
-                accept=".json,.xlsx,.xls"
+                accept=".json,.xlsx,.xls,.zip"
                 onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
                 className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-primary file:px-3 file:py-1 file:text-primary-foreground hover:file:bg-primary/90"
               />
@@ -872,12 +1178,16 @@ export default function QuestionsPage() {
               <p className="font-medium text-foreground">Supported formats:</p>
               <ul className="mt-1 space-y-0.5">
                 <li>
+                  <b>ZIP</b> (recommended): Excel + images folder bundled
+                  together. Columns: Question Text, Question Image, Type, Option
+                  1-6, Option 1-6 Image, Correct Options, Solution, Explanation,
+                  Tags
+                </li>
+                <li>
                   <b>JSON</b>: Array of questions or {"{ questions: [...] }"}
                 </li>
                 <li>
-                  <b>Excel</b>: Columns: Question Text, Type, Difficulty, Marks,
-                  Neg. Marks, Option 1-6, Correct Options, Solution,
-                  Explanation, Tags
+                  <b>Excel</b>: Same columns as ZIP but without image support
                 </li>
               </ul>
             </div>
@@ -889,13 +1199,180 @@ export default function QuestionsPage() {
             <Button
               onClick={() => importMutation.mutate()}
               disabled={
-                importMutation.isPending ||
-                !importFile ||
-                !importBankId ||
-                !importSubjectId
+                importMutation.isPending || !importFile || !importSubjectId
               }
             >
               {importMutation.isPending ? "Importing..." : "Import Questions"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Question</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label>Type</Label>
+                <select
+                  value={editForm.type}
+                  onChange={(e) =>
+                    setEditForm((f) => ({
+                      ...f,
+                      type: e.target.value as QuestionType,
+                    }))
+                  }
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+                >
+                  {QUESTION_TYPES.map((t) => (
+                    <option key={t.value} value={t.value}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Question Text</Label>
+              <textarea
+                value={editForm.contentText}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, contentText: e.target.value }))
+                }
+                rows={3}
+                className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
+                placeholder="Enter the question..."
+              />
+            </div>
+            {["mcq_single", "mcq_multiple", "true_false"].includes(
+              editForm.type,
+            ) && (
+              <div className="space-y-2">
+                <Label>
+                  Options (select correct answer
+                  {editForm.type === "mcq_multiple" ? "s" : ""})
+                </Label>
+                {[1, 2, 3, 4].map((idx) => {
+                  const isMultiple = editForm.type === "mcq_multiple";
+                  const isChecked = isMultiple
+                    ? editForm.correctOptions.includes(String(idx))
+                    : editForm.correctOption === String(idx);
+                  return (
+                    <div key={idx} className="flex items-center gap-2">
+                      <input
+                        type={isMultiple ? "checkbox" : "radio"}
+                        name="editCorrectOption"
+                        checked={isChecked}
+                        onChange={(e) => {
+                          if (isMultiple) {
+                            setEditForm((f) => ({
+                              ...f,
+                              correctOptions: e.target.checked
+                                ? [...f.correctOptions, String(idx)]
+                                : f.correctOptions.filter(
+                                    (c) => c !== String(idx),
+                                  ),
+                            }));
+                          } else {
+                            setEditForm((f) => ({
+                              ...f,
+                              correctOption: String(idx),
+                            }));
+                          }
+                        }}
+                        className="h-4 w-4"
+                      />
+                      <Input
+                        value={
+                          editForm[
+                            `option${idx}` as keyof typeof editForm
+                          ] as string
+                        }
+                        onChange={(e) =>
+                          setEditForm((f) => ({
+                            ...f,
+                            [`option${idx}`]: e.target.value,
+                          }))
+                        }
+                        placeholder={`Option ${idx}`}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label>Solution / Explanation (optional)</Label>
+              <textarea
+                value={editForm.solutionText}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, solutionText: e.target.value }))
+                }
+                rows={2}
+                className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
+                placeholder="Enter solution or explanation..."
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Tags (comma-separated)</Label>
+              <Input
+                value={editForm.tags}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, tags: e.target.value }))
+                }
+                placeholder="e.g. algebra, calculus, derivatives"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => editMutation.mutate()}
+              disabled={editMutation.isPending || !editForm.contentText}
+            >
+              {editMutation.isPending ? "Saving..." : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Deactivate Confirm Dialog */}
+      <Dialog open={bulkDeleteConfirmOpen} onOpenChange={setBulkDeleteConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-red-500">Confirm Bulk Deactivation</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground">
+              Are you sure you want to deactivate{" "}
+              <span className="font-bold text-foreground">
+                {table.getSelectedRowModel().rows.length}
+              </span>{" "}
+              selected question(s)? Deactivated questions will be hidden from exams.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setBulkDeleteConfirmOpen(false)}
+              disabled={bulkDeleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleBulkDelete}
+              disabled={bulkDeleting}
+            >
+              {bulkDeleting && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              Deactivate Selected
             </Button>
           </DialogFooter>
         </DialogContent>

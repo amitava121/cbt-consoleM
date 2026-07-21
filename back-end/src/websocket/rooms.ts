@@ -73,7 +73,8 @@ export class RoomManager {
       this.leave(socket);
       return false;
     }
-    const message = typeof payload === "string" ? payload : JSON.stringify(payload);
+    const message =
+      typeof payload === "string" ? payload : JSON.stringify(payload);
     socket.send(message);
     return true;
   }
@@ -139,6 +140,17 @@ export class RoomManager {
    */
   getClientCount(): number {
     return this.clientMeta.size;
+  }
+
+  /**
+   * Find the existing socket for a given userId (if any).
+   * Used to detect and reject duplicate WebSocket connections.
+   */
+  getSocketByUserId(userId: string): WebSocket | undefined {
+    for (const [socket, meta] of this.clientMeta) {
+      if (meta.userId === userId) return socket;
+    }
+    return undefined;
   }
 }
 

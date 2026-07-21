@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
 import { authService } from "../services/auth";
 
 interface AuthUser {
@@ -28,7 +28,10 @@ export const useAuthStore = create<AuthState>()(
         localStorage.setItem("accessToken", res.accessToken);
         localStorage.setItem("refreshToken", res.refreshToken);
         const payload = JSON.parse(atob(res.accessToken.split(".")[1]));
-        set({ user: { id: payload.sub, role: payload.role }, isAuthenticated: true });
+        set({
+          user: { id: payload.sub, role: payload.role },
+          isAuthenticated: true,
+        });
       },
 
       logout: async () => {
@@ -41,7 +44,7 @@ export const useAuthStore = create<AuthState>()(
       init: () => {
         const token = localStorage.getItem("accessToken");
         if (!token) {
-          set({ isLoading: false });
+          set({ user: null, isAuthenticated: false, isLoading: false });
           return;
         }
         try {
@@ -52,7 +55,11 @@ export const useAuthStore = create<AuthState>()(
             localStorage.removeItem("refreshToken");
             set({ user: null, isAuthenticated: false, isLoading: false });
           } else {
-            set({ user: { id: payload.sub, role: payload.role }, isAuthenticated: true, isLoading: false });
+            set({
+              user: { id: payload.sub, role: payload.role },
+              isAuthenticated: true,
+              isLoading: false,
+            });
           }
         } catch {
           set({ user: null, isAuthenticated: false, isLoading: false });
@@ -62,7 +69,10 @@ export const useAuthStore = create<AuthState>()(
     {
       name: "cbe-auth",
       storage: createJSONStorage(() => localStorage),
-      partialize: (state) => ({ user: state.user, isAuthenticated: state.isAuthenticated }),
+      partialize: (state) => ({
+        user: state.user,
+        isAuthenticated: state.isAuthenticated,
+      }),
     },
   ),
 );

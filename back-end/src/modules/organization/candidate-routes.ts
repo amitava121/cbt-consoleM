@@ -1,11 +1,10 @@
-import { and, asc, eq, ilike, or, sql } from "drizzle-orm";
+import { and, asc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { type FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { db } from "../../database/db.js";
 import {
-    batches,
+    batchCandidates,
     candidates,
-    centers,
     users,
 } from "../../database/schemas/index.js";
 import { requireRole } from "../../middleware/rbac.js";
@@ -18,13 +17,17 @@ const listQuerySchema = z.object({
   search: z.string().optional(),
   batchId: z.string().uuid().optional(),
   isActive: z.enum(["true", "false"]).optional(),
+  institutionId: z.string().uuid().optional(),
 });
 
 const createCandidateSchema = z.object({
   email: z.string().email(),
   fullName: z.string().min(1).max(255),
-  password: z.string().min(6).max(100),
+  dateOfBirth: z
+    .string()
+    .regex(/^\d{8}$/, "dateOfBirth must be in ddmmyyyy format"),
   batchId: z.string().uuid().optional().nullable(),
+  institutionId: z.string().uuid().optional().nullable(),
   rollNumber: z.string().max(50).optional(),
   admitCardNumber: z.string().max(50).optional(),
   photoUrl: z.string().max(500).optional(),
@@ -38,16 +41,24 @@ const updateCandidateSchema = z.object({
   admitCardNumber: z.string().max(50).optional(),
   photoUrl: z.string().max(500).optional(),
   phone: z.string().max(20).optional(),
+  dateOfBirth: z
+    .string()
+    .regex(/^\d{8}$/, "dateOfBirth must be in ddmmyyyy format")
+    .optional(),
   isActive: z.boolean().optional(),
 });
 
 const bulkImportSchema = z.object({
   batchId: z.string().uuid().optional().nullable(),
+  institutionId: z.string().uuid().optional().nullable(),
   candidates: z
     .array(
       z.object({
         email: z.string().email(),
         fullName: z.string().min(1).max(255),
+        dateOfBirth: z
+          .string()
+          .regex(/^\d{8}$/, "dateOfBirth must be in ddmmyyyy format"),
         rollNumber: z.string().max(50).optional(),
         admitCardNumber: z.string().max(50).optional(),
         phone: z.string().max(20).optional(),
@@ -68,7 +79,8 @@ const candidateRoutes: FastifyPluginAsync = async (app) => {
     if (!parsed.success)
       return reply.code(400).send({ error: "Invalid query parameters" });
 
-    const { page, pageSize, search, batchId, isActive } = parsed.data;
+    const { page, pageSize, search, batchId, isActive, institutionId } =
+      parsed.data;
     const offset = (page - 1) * pageSize;
 
     const conditions = [];
@@ -86,9 +98,20 @@ const candidateRoutes: FastifyPluginAsync = async (app) => {
         ),
       );
     }
-    if (batchId) conditions.push(eq(candidates.batchId, batchId));
+    if (batchId)
+      conditions.push(
+        inArray(
+          candidates.id,
+          db
+            .select({ id: batchCandidates.candidateId })
+            .from(batchCandidates)
+            .where(eq(batchCandidates.batchId, batchId)),
+        ),
+      );
     if (isActive !== undefined)
       conditions.push(eq(candidates.isActive, isActive === "true"));
+    if (institutionId)
+      conditions.push(eq(candidates.institutionId, institutionId));
 
     const where = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -101,17 +124,19 @@ const candidateRoutes: FastifyPluginAsync = async (app) => {
           rollNumber: candidates.rollNumber,
           admitCardNumber: candidates.admitCardNumber,
           photoUrl: candidates.photoUrl,
+          dateOfBirth: candidates.dateOfBirth,
           isActive: candidates.isActive,
           createdAt: candidates.createdAt,
           updatedAt: candidates.updatedAt,
           email: users.email,
           fullName: users.fullName,
           phone: users.phone,
-          batchName: batches.name,
+          batchName: sql<
+            string | null
+          >`(SELECT string_agg(b.name, ', ') FROM batch_candidates bc JOIN batches b ON b.id = bc.batch_id WHERE bc.candidate_id = ${candidates.id})`,
         })
         .from(candidates)
         .innerJoin(users, eq(candidates.userId, users.id))
-        .leftJoin(batches, eq(candidates.batchId, batches.id))
         .where(where)
         .orderBy(asc(candidates.createdAt))
         .limit(pageSize)
@@ -143,17 +168,18 @@ const candidateRoutes: FastifyPluginAsync = async (app) => {
     const {
       email,
       fullName,
-      password,
+      dateOfBirth,
       batchId,
+      institutionId,
       rollNumber,
       admitCardNumber,
       photoUrl,
       phone,
     } = parsed.data;
 
-    // Hash password BEFORE transaction to avoid holding DB lock during CPU work
+    // Password = DOB in ddmmyyyy format
     const { hash } = await import("@node-rs/argon2");
-    const passwordHash = await hash(password);
+    const passwordHash = await hash(dateOfBirth);
 
     // Atomic insert with ON CONFLICT DO NOTHING — eliminates TOCTOU race condition
     const result = await db.transaction(async (tx) => {
@@ -176,9 +202,11 @@ const candidateRoutes: FastifyPluginAsync = async (app) => {
         .values({
           userId: user.id,
           batchId: batchId ?? null,
+          institutionId: institutionId ?? null,
           rollNumber: rollNumber ?? null,
           admitCardNumber: admitCardNumber ?? null,
           photoUrl: photoUrl ?? null,
+          dateOfBirth,
         })
         .returning();
 
@@ -203,19 +231,19 @@ const candidateRoutes: FastifyPluginAsync = async (app) => {
         rollNumber: candidates.rollNumber,
         admitCardNumber: candidates.admitCardNumber,
         photoUrl: candidates.photoUrl,
+        dateOfBirth: candidates.dateOfBirth,
         isActive: candidates.isActive,
         createdAt: candidates.createdAt,
         updatedAt: candidates.updatedAt,
         email: users.email,
         fullName: users.fullName,
         phone: users.phone,
-        batchName: batches.name,
-        centerName: centers.name,
+        batchName: sql<
+          string | null
+        >`(SELECT string_agg(b.name, ', ') FROM batch_candidates bc JOIN batches b ON b.id = bc.batch_id WHERE bc.candidate_id = ${candidates.id})`,
       })
       .from(candidates)
       .innerJoin(users, eq(candidates.userId, users.id))
-      .leftJoin(batches, eq(candidates.batchId, batches.id))
-      .leftJoin(centers, eq(batches.centerId, centers.id))
       .where(eq(candidates.id, id))
       .limit(1);
 
@@ -241,6 +269,7 @@ const candidateRoutes: FastifyPluginAsync = async (app) => {
       admitCardNumber,
       photoUrl,
       phone,
+      dateOfBirth,
       isActive,
     } = parsed.data;
 
@@ -254,6 +283,7 @@ const candidateRoutes: FastifyPluginAsync = async (app) => {
           ...(rollNumber !== undefined ? { rollNumber } : {}),
           ...(admitCardNumber !== undefined ? { admitCardNumber } : {}),
           ...(photoUrl !== undefined ? { photoUrl } : {}),
+          ...(dateOfBirth !== undefined ? { dateOfBirth } : {}),
           ...(isActive !== undefined ? { isActive } : {}),
           updatedAt: new Date(),
         })
@@ -283,17 +313,19 @@ const candidateRoutes: FastifyPluginAsync = async (app) => {
           rollNumber: candidates.rollNumber,
           admitCardNumber: candidates.admitCardNumber,
           photoUrl: candidates.photoUrl,
+          dateOfBirth: candidates.dateOfBirth,
           isActive: candidates.isActive,
           createdAt: candidates.createdAt,
           updatedAt: candidates.updatedAt,
           email: users.email,
           fullName: users.fullName,
           phone: users.phone,
-          batchName: batches.name,
+          batchName: sql<
+            string | null
+          >`(SELECT string_agg(b.name, ', ') FROM batch_candidates bc JOIN batches b ON b.id = bc.batch_id WHERE bc.candidate_id = ${candidates.id})`,
         })
         .from(candidates)
         .innerJoin(users, eq(candidates.userId, users.id))
-        .leftJoin(batches, eq(candidates.batchId, batches.id))
         .where(eq(candidates.id, id))
         .limit(1);
 
@@ -305,6 +337,89 @@ const candidateRoutes: FastifyPluginAsync = async (app) => {
     return reply.send(row);
   });
 
+  /* ----- DELETE /candidates/:id — delete candidate with cascade ----- */
+  app.delete("/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+
+    try {
+      await db.transaction(async (tx) => {
+        // 1. Find the candidate to get userId
+        const [candidate] = await tx
+          .select({ userId: candidates.userId })
+          .from(candidates)
+          .where(eq(candidates.id, id))
+          .limit(1);
+
+        if (!candidate) throw new Error("Candidate not found");
+
+        // 2. Delete attempt-dependent data for this candidate
+        await tx.execute(
+          sql`DELETE FROM answer_snapshots WHERE answer_id IN (SELECT a.id FROM answers a JOIN attempts at ON a.attempt_id = at.id WHERE at.candidate_id = ${id})`,
+        );
+        await tx.execute(
+          sql`DELETE FROM answers WHERE attempt_id IN (SELECT at.id FROM attempts at WHERE at.candidate_id = ${id})`,
+        );
+        await tx.execute(
+          sql`DELETE FROM event_logs WHERE attempt_id IN (SELECT at.id FROM attempts at WHERE at.candidate_id = ${id})`,
+        );
+        await tx.execute(
+          sql`DELETE FROM violation_reports WHERE attempt_id IN (SELECT at.id FROM attempts at WHERE at.candidate_id = ${id})`,
+        );
+        await tx.execute(
+          sql`DELETE FROM proctoring_events WHERE attempt_id IN (SELECT at.id FROM attempts at WHERE at.candidate_id = ${id})`,
+        );
+        await tx.execute(
+          sql`DELETE FROM scores WHERE attempt_id IN (SELECT at.id FROM attempts at WHERE at.candidate_id = ${id})`,
+        );
+        await tx.execute(
+          sql`DELETE FROM scorecards WHERE attempt_id IN (SELECT at.id FROM attempts at WHERE at.candidate_id = ${id})`,
+        );
+        await tx.execute(
+          sql`DELETE FROM certificates WHERE attempt_id IN (SELECT at.id FROM attempts at WHERE at.candidate_id = ${id})`,
+        );
+        await tx.execute(
+          sql`DELETE FROM session_tokens WHERE attempt_id IN (SELECT at.id FROM attempts at WHERE at.candidate_id = ${id})`,
+        );
+
+        // 3. Delete attempts
+        await tx.execute(sql`DELETE FROM attempts WHERE candidate_id = ${id}`);
+
+        // 4. Delete exam_batch_candidates
+        await tx.execute(
+          sql`DELETE FROM exam_batch_candidates WHERE candidate_id = ${id}`,
+        );
+
+        // 5. Delete scorecards and certificates by candidate_id
+        await tx.execute(
+          sql`DELETE FROM scorecards WHERE candidate_id = ${id}`,
+        );
+        await tx.execute(
+          sql`DELETE FROM certificates WHERE candidate_id = ${id}`,
+        );
+
+        // 6. Delete session_tokens and audit_logs for the user
+        await tx.execute(
+          sql`DELETE FROM session_tokens WHERE user_id = ${candidate.userId}`,
+        );
+        await tx.execute(
+          sql`DELETE FROM audit_logs WHERE user_id = ${candidate.userId}`,
+        );
+
+        // 7. Delete the candidate
+        await tx.delete(candidates).where(eq(candidates.id, id));
+
+        // 8. Delete the user
+        await tx.delete(users).where(eq(users.id, candidate.userId));
+      });
+    } catch (err) {
+      if (err instanceof Error && err.message === "Candidate not found")
+        return reply.code(404).send({ error: "Candidate not found" });
+      throw err;
+    }
+
+    return reply.send({ message: "Candidate deleted successfully" });
+  });
+
   /* ----- POST /candidates/bulk — bulk import ----- */
   app.post("/bulk", async (request, reply) => {
     const parsed = bulkImportSchema.safeParse(request.body);
@@ -314,7 +429,7 @@ const candidateRoutes: FastifyPluginAsync = async (app) => {
         details: parsed.error.flatten().fieldErrors,
       });
 
-    const { batchId, candidates: importRows } = parsed.data;
+    const { batchId, institutionId, candidates: importRows } = parsed.data;
 
     // Deduplicate by email within the payload
     const seenEmails = new Set<string>();
@@ -325,9 +440,14 @@ const candidateRoutes: FastifyPluginAsync = async (app) => {
       return true;
     });
 
-    // Hash default password BEFORE transaction
+    // Hash each candidate's password (DOB) BEFORE transaction
     const { hash } = await import("@node-rs/argon2");
-    const defaultPasswordHash = await hash("Candidate@123");
+    const rowsWithHash = await Promise.all(
+      uniqueRows.map(async (r) => ({
+        ...r,
+        passwordHash: await hash(r.dateOfBirth),
+      })),
+    );
 
     // Atomic bulk insert with ON CONFLICT DO NOTHING — eliminates race conditions
     // No pre-check needed; PostgreSQL handles uniqueness atomically
@@ -339,7 +459,7 @@ const candidateRoutes: FastifyPluginAsync = async (app) => {
           uniqueRows.map((r) => ({
             email: r.email,
             fullName: r.fullName,
-            passwordHash: defaultPasswordHash,
+            passwordHash: emailToHash.get(r.email.toLowerCase())!,
             role: "candidate" as const,
             phone: r.phone ?? null,
           })),
@@ -355,13 +475,18 @@ const candidateRoutes: FastifyPluginAsync = async (app) => {
       const emailToRow = new Map(
         uniqueRows.map((r) => [r.email.toLowerCase(), r]),
       );
+      const emailToHash = new Map(
+        rowsWithHash.map((r) => [r.email.toLowerCase(), r.passwordHash]),
+      );
 
       const candidateRows = createdUsers.map((u) => ({
         userId: u.id,
         batchId: batchId ?? null,
+        institutionId: institutionId ?? null,
         rollNumber: emailToRow.get(u.email.toLowerCase())?.rollNumber ?? null,
         admitCardNumber:
           emailToRow.get(u.email.toLowerCase())?.admitCardNumber ?? null,
+        dateOfBirth: emailToRow.get(u.email.toLowerCase())?.dateOfBirth ?? null,
       }));
 
       const createdCandidates = await tx
@@ -380,6 +505,65 @@ const candidateRoutes: FastifyPluginAsync = async (app) => {
       imported: result.imported,
       skipped: result.skipped,
     });
+  });
+
+  /* ----- GET /candidates/template — download CSV template ----- */
+  app.get("/template", async (_request, reply) => {
+    const csv = "email,fullName,dateOfBirth,rollNumber,admitCardNumber,phone\n";
+    reply.header("Content-Type", "text/csv");
+    reply.header(
+      "Content-Disposition",
+      'attachment; filename="candidates_template.csv"',
+    );
+    return reply.send(csv);
+  });
+
+  /* ----- POST /candidates/assign — assign candidates to a batch ----- */
+  app.post("/assign", async (request, reply) => {
+    const schema = z.object({
+      batchId: z.string().uuid(),
+      candidateIds: z.array(z.string().uuid()).min(1),
+    });
+    const parsed = schema.safeParse(request.body);
+    if (!parsed.success)
+      return reply.code(400).send({ error: "Invalid request body" });
+
+    const { batchId: bId, candidateIds } = parsed.data;
+
+    const inserted = await db
+      .insert(batchCandidates)
+      .values(candidateIds.map((cid) => ({ batchId: bId, candidateId: cid })))
+      .onConflictDoNothing()
+      .returning({ id: batchCandidates.id });
+
+    return reply.code(201).send({
+      message: `${inserted.length} candidate(s) assigned to batch`,
+      assigned: inserted.length,
+    });
+  });
+
+  /* ----- DELETE /candidates/remove-from-batch — remove candidate from batch ----- */
+  app.delete("/remove-from-batch", async (request, reply) => {
+    const schema = z.object({
+      batchId: z.string().uuid(),
+      candidateId: z.string().uuid(),
+    });
+    const parsed = schema.safeParse(request.body);
+    if (!parsed.success)
+      return reply.code(400).send({ error: "Invalid request body" });
+
+    const { batchId: bId, candidateId } = parsed.data;
+
+    await db
+      .delete(batchCandidates)
+      .where(
+        and(
+          eq(batchCandidates.batchId, bId),
+          eq(batchCandidates.candidateId, candidateId),
+        ),
+      );
+
+    return reply.send({ message: "Candidate removed from batch" });
   });
 };
 

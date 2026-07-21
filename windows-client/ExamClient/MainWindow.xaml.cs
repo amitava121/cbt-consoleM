@@ -77,6 +77,17 @@ public partial class MainWindow : Window
                 Log.Warning("Server unreachable at startup — will retry from login screen");
             }
 
+            // Step 3b: Self-register device + start heartbeat (best-effort, non-blocking)
+            try
+            {
+                var heartbeatService = App.Services.GetRequiredService<DeviceHeartbeatService>();
+                _ = heartbeatService.StartAsync();
+            }
+            catch (Exception ex)
+            {
+                Log.Debug(ex, "Device heartbeat service failed to start — non-critical");
+            }
+
             // Step 4: Check for crash recovery (CLIENT_ARCHITECTURE.md Section 8.1)
             var shouldRecover = await CheckCrashRecoveryAsync();
 
@@ -332,5 +343,6 @@ public partial class MainWindow : Window
         _processMonitor?.Dispose();
         _clipboardMonitor?.Dispose();
         App.Services.GetService<TokenRefreshService>()?.Dispose();
+        App.Services.GetService<DeviceHeartbeatService>()?.Dispose();
     }
 }

@@ -2,18 +2,22 @@ import { and, eq, gt } from "drizzle-orm";
 import { type FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { db } from "../../database/db.js";
+import { redis } from "../../database/redis.js";
 import {
-  deviceRegistrations,
-  institutions,
-  sessionTokens,
-  users,
+    candidates,
+    deviceRegistrations,
+    examBatchCandidates,
+    examBatches,
+    institutions,
+    sessionTokens,
+    users,
 } from "../../database/schemas/index.js";
 import {
-  generateTokenPair,
-  hashPassword,
-  verifyPassword,
-  verifyToken,
-  type TokenPayload,
+    generateTokenPair,
+    hashPassword,
+    verifyPassword,
+    verifyToken,
+    type TokenPayload,
 } from "../../services/auth.js";
 
 const loginSchema = z.object({
@@ -24,6 +28,15 @@ const loginSchema = z.object({
 
 const refreshSchema = z.object({
   refreshToken: z.string().min(1),
+});
+
+const candidateLoginSchema = z.object({
+  admitCardNumber: z.string().min(1),
+  dateOfBirth: z
+    .string()
+    .regex(/^\d{8}$/, "Date of birth must be in DDMMYYYY format"),
+  deviceId: z.string().optional(),
+  deviceFingerprint: z.string().optional(),
 });
 
 const authRoutes: FastifyPluginAsync = async (app) => {
@@ -239,6 +252,146 @@ const authRoutes: FastifyPluginAsync = async (app) => {
     return { message: "Logged out" };
   });
 
+  // ─── POST /auth/candidate-login ───────────────────────────────
+  app.post(
+    "/candidate-login",
+    {
+      config: { rateLimit: { max: 5, timeWindow: "1 minute" } },
+    },
+    async (request, reply) => {
+      const parsed = candidateLoginSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: "Invalid request body",
+          details: parsed.error.flatten().fieldErrors,
+        });
+      }
+      const body = parsed.data;
+
+      // Look up candidate by admit card number
+      const [candidate] = await db
+        .select({
+          id: candidates.id,
+          userId: candidates.userId,
+          dateOfBirth: candidates.dateOfBirth,
+          isActive: candidates.isActive,
+          fullName: users.fullName,
+        })
+        .from(candidates)
+        .innerJoin(users, eq(users.id, candidates.userId))
+        .where(eq(candidates.admitCardNumber, body.admitCardNumber))
+        .limit(1);
+
+      if (!candidate) {
+        return reply.code(401).send({ error: "Invalid admit card number" });
+      }
+
+      if (!candidate.isActive) {
+        return reply.code(403).send({ error: "Candidate account disabled" });
+      }
+
+      // Verify DOB (stored as DDMMYYYY string)
+      if (candidate.dateOfBirth !== body.dateOfBirth) {
+        return reply.code(401).send({ error: "Date of birth does not match" });
+      }
+
+      // Check if candidate is assigned to any active exam batch
+      const assignments = await db
+        .select({
+          examBatchId: examBatchCandidates.examBatchId,
+          status: examBatches.status,
+        })
+        .from(examBatchCandidates)
+        .innerJoin(
+          examBatches,
+          eq(examBatches.id, examBatchCandidates.examBatchId),
+        )
+        .where(eq(examBatchCandidates.candidateId, candidate.id));
+
+      const activeBatches = assignments.filter((a) => a.status === "active");
+
+      if (activeBatches.length === 0) {
+        return reply.code(403).send({
+          error: "No active exams assigned. Please contact your administrator.",
+        });
+      }
+
+      // Revoke all previous active tokens for this candidate (single session enforcement)
+      await db
+        .update(sessionTokens)
+        .set({ isRevoked: true, revokedAt: new Date() })
+        .where(
+          and(
+            eq(sessionTokens.userId, candidate.userId),
+            eq(sessionTokens.isRevoked, false),
+          ),
+        );
+
+      // Generate tokens with candidate role
+      const tokens = generateTokenPair({
+        sub: candidate.userId,
+        role: "candidate",
+        deviceId: body.deviceId,
+      });
+
+      const accessJti = verifyToken(tokens.accessToken).jti;
+      const refreshJti = verifyToken(tokens.refreshToken).jti;
+
+      await db.insert(sessionTokens).values([
+        {
+          userId: candidate.userId,
+          tokenJti: accessJti,
+          tokenType: "access",
+          expiresAt: tokens.accessExpiresAt,
+        },
+        {
+          userId: candidate.userId,
+          tokenJti: refreshJti,
+          tokenType: "refresh",
+          expiresAt: tokens.refreshExpiresAt,
+        },
+      ]);
+
+      await db
+        .update(users)
+        .set({ lastLoginAt: new Date(), failedLoginCount: 0 })
+        .where(eq(users.id, candidate.userId));
+
+      // Acquire Redis session lock — single session enforcement
+      // TTL = 900s (15 min, matches access token expiry). Heartbeat refreshes it.
+      const lockKey = `session:lock:${candidate.userId}`;
+      await redis.set(lockKey, accessJti, "EX", 900);
+
+      // Store device fingerprint in Redis for verification on heartbeat
+      if (body.deviceFingerprint) {
+        await redis.set(
+          `session:fingerprint:${candidate.userId}`,
+          body.deviceFingerprint,
+          "EX",
+          900,
+        );
+      }
+
+      const expiresInSeconds = Math.floor(
+        (tokens.accessExpiresAt.getTime() - Date.now()) / 1000,
+      );
+
+      return {
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiresIn: expiresInSeconds,
+        accessExpiresAt: tokens.accessExpiresAt.toISOString(),
+        refreshExpiresAt: tokens.refreshExpiresAt.toISOString(),
+        user: {
+          id: candidate.userId,
+          fullName: candidate.fullName,
+          role: "candidate",
+          activeExamBatchIds: activeBatches.map((a) => a.examBatchId),
+        },
+      };
+    },
+  );
+
   // ─── POST /auth/change-password ───────────────────────────────
   app.post("/change-password", async (request, reply) => {
     const authHeader = request.headers.authorization;
@@ -351,10 +504,8 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   exam_admin: [
     "users:read",
     "institutions:read",
-    "centers:read",
     "batches:read",
     "subjects:read",
-    "topics:read",
     "question-banks:read",
     "questions:read",
     "exams:read",
@@ -380,7 +531,6 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     "questions:read",
     "questions:write",
     "subjects:read",
-    "topics:read",
   ],
   candidate: [
     "candidate:exams:read",

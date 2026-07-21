@@ -1,0 +1,34 @@
+FROM node:24-alpine
+
+WORKDIR /app
+
+# Install Chromium for Puppeteer + curl for API calls
+RUN apk add --no-cache \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont \
+    curl
+
+# Tell Puppeteer to use installed Chromium
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+ENV PUPPETEER_NO_SANDBOX=true
+
+# Install puppeteer (with ESM support)
+RUN echo '{"type":"module"}' > package.json && npm install puppeteer
+
+# Copy client scripts
+COPY tests/docker-client.js ./
+COPY tests/mock-device-clients.js ./
+
+# Environment defaults (overridden by docker-compose)
+ENV SERVER_URL=http://cbe-server:3000
+ENV HEARTBEAT_INTERVAL=15
+ENV CLIENT_ID=LAB-PC
+ENV CLIENT_NAME=Lab-PC
+ENV ADMIN_URL=http://cbe-server:3000
+
+CMD ["node", "docker-client.js"]

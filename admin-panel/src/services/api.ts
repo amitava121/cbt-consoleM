@@ -49,6 +49,15 @@ api.interceptors.response.use(
 
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
+      const refreshToken = localStorage.getItem("refreshToken");
+      if (!refreshToken) {
+        localStorage.removeItem("accessToken");
+        localStorage.removeItem("refreshToken");
+        if (window.location.pathname !== "/login") {
+          window.location.href = "/login";
+        }
+        return Promise.reject(error);
+      }
       try {
         const newToken = await refreshAccessToken();
         if (originalRequest.headers) {
@@ -58,7 +67,9 @@ api.interceptors.response.use(
       } catch {
         localStorage.removeItem("accessToken");
         localStorage.removeItem("refreshToken");
-        window.location.href = "/login";
+        if (window.location.pathname !== "/login") {
+          window.location.href = "/login";
+        }
         return Promise.reject(error);
       }
     }

@@ -1,5 +1,4 @@
 import {
-    boolean,
     decimal,
     index,
     integer,
@@ -7,7 +6,7 @@ import {
     pgTable,
     timestamp,
     uuid,
-    varchar
+    varchar,
 } from "drizzle-orm/pg-core";
 import { examBatches } from "./exam.js";
 import { attempts } from "./execution.js";
@@ -26,11 +25,7 @@ export const scores = pgTable(
       precision: 8,
       scale: 2,
     }).notNull(),
-    negativeMarks: decimal("negative_marks", { precision: 8, scale: 2 })
-      .notNull()
-      .default("0"),
     netScore: decimal("net_score", { precision: 8, scale: 2 }).notNull(),
-    isPassed: boolean("is_passed").notNull(),
     sectionScoresJson: jsonb("section_scores_json"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

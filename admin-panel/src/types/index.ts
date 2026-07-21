@@ -55,20 +55,10 @@ export interface PaginatedResponse<T> {
 
 export interface Subject {
   id: string;
+  institutionId: string;
   name: string;
   code: string;
   description?: string | null;
-  isActive: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface Topic {
-  id: string;
-  subjectId: string;
-  name: string;
-  description?: string | null;
-  parentTopicId?: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -99,8 +89,6 @@ export type QuestionType =
   | "numerical"
   | "matrix_match";
 
-export type DifficultyLevel = "easy" | "medium" | "hard" | "very_hard";
-
 export type CognitiveLevel =
   | "remember"
   | "understand"
@@ -119,23 +107,15 @@ export interface QuestionOption {
 
 export interface Question {
   id: string;
-  questionBankId: string;
   subjectId: string;
-  topicId?: string | null;
   type: QuestionType;
-  difficulty: DifficultyLevel;
   cognitiveLevel?: CognitiveLevel | null;
-  marks: string;
-  negativeMarks: string;
-  estimatedTimeSecs?: number | null;
   contentJson: Record<string, unknown>;
   mediaUrlsJson?: string[] | null;
   solutionJson?: Record<string, unknown> | null;
   isActive: boolean;
   version: number;
   createdBy: string;
-  approvedBy?: string | null;
-  approvedAt?: string | null;
   usageCount: number;
   errorCount: number;
   createdAt: string;
@@ -145,15 +125,9 @@ export interface Question {
 }
 
 export interface CreateQuestionInput {
-  questionBankId: string;
   subjectId: string;
-  topicId?: string | null;
   type: QuestionType;
-  difficulty: DifficultyLevel;
   cognitiveLevel?: CognitiveLevel | null;
-  marks: number;
-  negativeMarks?: number;
-  estimatedTimeSecs?: number | null;
   content: { text: string; latex?: string | null; passageId?: string | null };
   mediaUrls?: string[];
   options?: { text: string; isCorrect: boolean; displayOrder: number }[];
@@ -178,7 +152,6 @@ export interface Institution {
   address?: string | null;
   contactEmail?: string | null;
   contactPhone?: string | null;
-  isActive: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -197,66 +170,28 @@ export interface UpdateInstitutionInput {
   address?: string;
   contactEmail?: string;
   contactPhone?: string;
-  isActive?: boolean;
-}
-
-export interface Center {
-  id: string;
-  institutionId: string;
-  name: string;
-  code: string;
-  address?: string | null;
-  capacity: number;
-  isActive: boolean;
-  createdAt: string;
-  updatedAt: string;
-  institutionName?: string;
-}
-
-export interface CreateCenterInput {
-  institutionId: string;
-  name: string;
-  code: string;
-  address?: string;
-  capacity?: number;
-}
-
-export interface UpdateCenterInput {
-  name?: string;
-  code?: string;
-  address?: string;
-  capacity?: number;
-  isActive?: boolean;
 }
 
 export interface Batch {
   id: string;
-  centerId: string;
+  institutionId: string;
   name: string;
   code: string;
-  startDate: string;
-  endDate?: string | null;
-  isActive: boolean;
   createdAt: string;
   updatedAt: string;
-  centerName?: string;
   institutionName?: string;
 }
 
 export interface CreateBatchInput {
-  centerId: string;
+  institutionId: string;
   name: string;
   code: string;
-  startDate: string;
-  endDate?: string;
 }
 
 export interface UpdateBatchInput {
+  institutionId?: string;
   name?: string;
   code?: string;
-  startDate?: string;
-  endDate?: string;
-  isActive?: boolean;
 }
 
 /* ---------- Exam Types ---------- */
@@ -271,7 +206,6 @@ export interface ExamSection {
   sectionOrder: number;
   durationMinutes?: number | null;
   totalMarks: string;
-  negativeMarkingPercentage: string;
   questionCount: number;
   navigationMode?: NavigationMode | null;
   shuffleQuestions: boolean;
@@ -287,47 +221,54 @@ export interface ExamQuestionRef {
   examSectionId: string;
   questionId: string;
   displayOrder: number;
-  marks: string;
-  negativeMarks: string;
   isOptional: boolean;
+  type?: string;
+  contentJson?: unknown;
+  options?: { optionText: string; isCorrect: boolean; displayOrder: number }[];
 }
 
 export interface Exam {
   id: string;
+  subjectId?: string | null;
+  batchId?: string | null;
   name: string;
   description?: string | null;
   code: string;
   durationMinutes: number;
   totalMarks: string;
-  passingMarks?: string | null;
-  hasNegativeMarking: boolean;
   selectionStrategy: SelectionStrategy;
   navigationMode: NavigationMode;
   shuffleQuestions: boolean;
   shuffleOptions: boolean;
   instructionsJson?: Record<string, unknown> | null;
   resultVisibility: string;
+  scheduledStartAt?: string | null;
   isActive: boolean;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
   sections?: ExamSection[];
+  subjectName?: string | null;
+  batchName?: string | null;
+  institutionName?: string | null;
+  institutionId?: string | null;
 }
 
 export interface CreateExamInput {
+  subjectId?: string | null;
+  batchId?: string | null;
   name: string;
   code: string;
   description?: string;
   durationMinutes: number;
   totalMarks: number;
-  passingMarks?: number;
-  hasNegativeMarking?: boolean;
   selectionStrategy?: SelectionStrategy;
   navigationMode?: NavigationMode;
   shuffleQuestions?: boolean;
   shuffleOptions?: boolean;
   instructions?: { title?: string; body?: string; rules?: string[] };
   resultVisibility?: string;
+  scheduledStartAt?: string | null;
 }
 
 export interface UpdateExamInput extends Partial<CreateExamInput> {}
@@ -337,7 +278,6 @@ export interface CreateSectionInput {
   sectionOrder: number;
   durationMinutes?: number;
   totalMarks: number;
-  negativeMarkingPercentage?: number;
   questionCount: number;
   navigationMode?: NavigationMode;
   shuffleQuestions?: boolean;
@@ -347,8 +287,6 @@ export interface CreateSectionInput {
 
 export interface AddExamQuestionsInput {
   questionIds: string[];
-  marks: number;
-  negativeMarks?: number;
   isOptional?: boolean;
 }
 
@@ -369,10 +307,8 @@ export interface ExamBatch {
   id: string;
   examId: string;
   batchId: string | null;
-  centerId: string | null;
   name: string;
   status: ExamBatchStatus;
-  shiftNumber: number;
   scheduledStartAt: string;
   scheduledEndAt: string;
   actualStartAt: string | null;
@@ -389,10 +325,8 @@ export interface ExamBatchListItem {
   id: string;
   examId: string;
   batchId: string | null;
-  centerId: string | null;
   name: string;
   status: ExamBatchStatus;
-  shiftNumber: number;
   scheduledStartAt: string;
   scheduledEndAt: string;
   actualStartAt: string | null;
@@ -400,28 +334,20 @@ export interface ExamBatchListItem {
   gracePeriodMinutes: number;
   createdAt: string;
   updatedAt: string;
+  examName?: string | null;
+  examCode?: string | null;
+  subjectName?: string | null;
+  batchName?: string | null;
 }
 
 export interface ExamBatchDetail extends ExamBatch {
-  schedules: ExamSchedule[];
   candidateCount: number;
-}
-
-export interface ExamSchedule {
-  id: string;
-  examBatchId: string;
-  startAt: string;
-  endAt: string;
-  isActive: boolean;
-  createdAt: string;
 }
 
 export interface CreateExamBatchInput {
   examId: string;
   batchId?: string | null;
-  centerId?: string | null;
   name: string;
-  shiftNumber?: number;
   scheduledStartAt: string;
   scheduledEndAt: string;
   gracePeriodMinutes?: number;
@@ -468,6 +394,28 @@ export interface AssignCandidatesInput {
   candidateIds: string[];
 }
 
+export interface CandidateConflict {
+  batchId: string;
+  batchName: string;
+  examId: string;
+  examName: string;
+  startAt: string;
+  endAt: string;
+  status: string;
+}
+
+export interface ConflictingCandidate {
+  candidateId: string;
+  admitCardNumber: string;
+  rollNumber: string | null;
+  conflicts: CandidateConflict[];
+}
+
+export interface CheckConflictsResponse {
+  hasConflicts: boolean;
+  conflictingCandidates: ConflictingCandidate[];
+}
+
 /* ---------- Candidate Types ---------- */
 
 export interface CandidateListItem {
@@ -477,6 +425,7 @@ export interface CandidateListItem {
   rollNumber: string | null;
   admitCardNumber: string | null;
   photoUrl: string | null;
+  dateOfBirth: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -486,15 +435,14 @@ export interface CandidateListItem {
   batchName: string | null;
 }
 
-export interface CandidateDetail extends CandidateListItem {
-  centerName: string | null;
-}
+export interface CandidateDetail extends CandidateListItem {}
 
 export interface CreateCandidateInput {
   email: string;
   fullName: string;
-  password: string;
+  dateOfBirth: string;
   batchId?: string | null;
+  institutionId?: string | null;
   rollNumber?: string;
   admitCardNumber?: string;
   photoUrl?: string;
@@ -508,12 +456,14 @@ export interface UpdateCandidateInput {
   admitCardNumber?: string;
   photoUrl?: string;
   phone?: string;
+  dateOfBirth?: string;
   isActive?: boolean;
 }
 
 export interface BulkImportCandidateRow {
   email: string;
   fullName: string;
+  dateOfBirth: string;
   rollNumber?: string;
   admitCardNumber?: string;
   phone?: string;
@@ -521,6 +471,7 @@ export interface BulkImportCandidateRow {
 
 export interface BulkImportInput {
   batchId?: string | null;
+  institutionId?: string | null;
   candidates: BulkImportCandidateRow[];
 }
 
@@ -545,13 +496,12 @@ export interface DeviceListItem {
   macAddress: string;
   hardwareHash: string;
   ipAddress: string | null;
-  centerId: string | null;
+  clientVersion: string | null;
   status: DeviceStatus;
   registeredBy: string;
   lastSeenAt: string | null;
   createdAt: string;
   updatedAt: string;
-  centerName: string | null;
 }
 
 export interface DeviceDetail extends DeviceListItem {}
@@ -562,23 +512,47 @@ export interface RegisterDeviceInput {
   macAddress: string;
   hardwareHash: string;
   ipAddress?: string;
-  centerId?: string | null;
 }
 
 export interface UpdateDeviceInput {
   deviceName?: string;
   ipAddress?: string;
-  centerId?: string | null;
+}
+
+export interface OnlineDevice {
+  id: string;
+  deviceId: string;
+  deviceName: string | null;
+  macAddress: string;
+  ipAddress: string | null;
+  clientVersion: string | null;
+  status: DeviceStatus;
+  lastSeenAt: string | null;
+}
+
+export interface SelfRegisterInput {
+  deviceId: string;
+  deviceName?: string;
+  macAddress: string;
+  hardwareHash: string;
+  ipAddress?: string;
+  clientVersion?: string;
 }
 
 export interface ActiveAttempt {
   id: string;
   candidateId: string;
+  candidateName: string | null;
   status: string;
   startedAt: string | null;
   remainingTimeSecs: number;
   isReconnected: boolean;
   reconnectedCount: number;
+  ipAddress: string | null;
+  userAgent: string | null;
+  deviceId: string | null;
+  deviceName: string | null;
+  wsConnected: boolean;
 }
 
 export interface ActiveSessionsResponse {

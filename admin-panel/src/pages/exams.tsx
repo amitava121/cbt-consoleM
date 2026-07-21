@@ -70,6 +70,28 @@ const columns: ColumnDef<Exam>[] = [
     cell: ({ row }) => row.getValue("totalMarks"),
   },
   {
+    accessorKey: "scheduledStartAt",
+    header: "Exam Date",
+    cell: ({ row }) => {
+      const val = row.getValue("scheduledStartAt") as string | null | undefined;
+      if (!val) return "—";
+      const d = new Date(val);
+      return (
+        <span className="text-sm">
+          {d.toLocaleDateString("en-IN", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+          })}{" "}
+          {d.toLocaleTimeString("en-IN", {
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </span>
+      );
+    },
+  },
+  {
     accessorKey: "selectionStrategy",
     header: "Strategy",
     cell: ({ row }) => (
@@ -101,13 +123,13 @@ interface ExamFormState {
   description: string;
   durationMinutes: number;
   totalMarks: number;
-  passingMarks: number;
-  hasNegativeMarking: boolean;
   selectionStrategy: SelectionStrategy;
   navigationMode: NavigationMode;
   shuffleQuestions: boolean;
   shuffleOptions: boolean;
   resultVisibility: string;
+  scheduledStartDate: string;
+  scheduledStartTime: string;
   instructionsTitle: string;
   instructionsBody: string;
   instructionsRules: string;
@@ -119,13 +141,13 @@ const emptyForm: ExamFormState = {
   description: "",
   durationMinutes: 180,
   totalMarks: 300,
-  passingMarks: 100,
-  hasNegativeMarking: true,
   selectionStrategy: "static" as const,
   navigationMode: "free" as const,
   shuffleQuestions: false,
   shuffleOptions: true,
   resultVisibility: "delayed",
+  scheduledStartDate: "",
+  scheduledStartTime: "",
   instructionsTitle: "",
   instructionsBody: "",
   instructionsRules: "",
@@ -172,7 +194,12 @@ export default function ExamsPage() {
       return examsService.create({
         ...examFields,
         description: examFields.description || undefined,
-        passingMarks: examFields.passingMarks || undefined,
+        scheduledStartAt:
+          examFields.scheduledStartDate && examFields.scheduledStartTime
+            ? new Date(
+                `${examFields.scheduledStartDate}T${examFields.scheduledStartTime}`,
+              ).toISOString()
+            : undefined,
         instructions,
       });
     },
@@ -205,28 +232,9 @@ export default function ExamsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Exams</h1>
-          <p className="text-sm text-muted-foreground">
-            Create and manage exam blueprints
-          </p>
-        </div>
-        <Button
-          onClick={() => {
-            setForm(emptyForm);
-            setWizardStep(0);
-            setCreateOpen(true);
-          }}
-        >
-          <Plus className="mr-2 h-4 w-4" />
-          Create Exam
-        </Button>
-      </div>
-
-      <div className="flex items-center gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="Search exams..."
             value={search}
@@ -234,9 +242,20 @@ export default function ExamsPage() {
               setSearch(e.target.value);
               setPage(1);
             }}
-            className="pl-8"
+            className="pl-9 h-9 text-xs"
           />
         </div>
+        <Button
+          size="sm"
+          onClick={() => {
+            setForm(emptyForm);
+            setWizardStep(0);
+            setCreateOpen(true);
+          }}
+        >
+          <Plus className="mr-1.5 h-3.5 w-3.5" />
+          Create Exam
+        </Button>
       </div>
 
       <div className="rounded-md border border-border">
@@ -430,26 +449,42 @@ export default function ExamsPage() {
                     }
                   />
                 </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="exam-passing">Passing Marks</Label>
+                  <Label htmlFor="exam-start-date">Exam Date</Label>
                   <Input
-                    id="exam-passing"
-                    type="number"
-                    min={0}
-                    value={form.passingMarks}
+                    id="exam-start-date"
+                    type="date"
+                    value={form.scheduledStartDate}
                     onChange={(e) =>
                       setForm((f) => ({
                         ...f,
-                        passingMarks: parseFloat(e.target.value) || 0,
+                        scheduledStartDate: e.target.value,
+                      }))
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="exam-start-time">Exam Time</Label>
+                  <Input
+                    id="exam-start-time"
+                    type="time"
+                    value={form.scheduledStartTime}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        scheduledStartTime: e.target.value,
                       }))
                     }
                   />
                 </div>
               </div>
+              <p className="text-xs text-muted-foreground">
+                When the exam is scheduled to start (for display purposes only)
+              </p>
             </div>
           )}
-
-          {/* Step 1: Configuration */}
           {wizardStep === 1 && (
             <div className="space-y-4 py-2">
               <div className="grid grid-cols-2 gap-4">
@@ -517,22 +552,7 @@ export default function ExamsPage() {
                     <option value="score_only">Score Only</option>
                   </select>
                 </div>
-                <div className="flex items-end gap-4 pb-1">
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={form.hasNegativeMarking}
-                      onChange={(e) =>
-                        setForm((f) => ({
-                          ...f,
-                          hasNegativeMarking: e.target.checked,
-                        }))
-                      }
-                      className="h-4 w-4 rounded border-input"
-                    />
-                    Negative Marking
-                  </label>
-                </div>
+                <div className="flex items-end gap-4 pb-1"></div>
               </div>
               <div className="flex gap-6">
                 <label className="flex items-center gap-2 text-sm">

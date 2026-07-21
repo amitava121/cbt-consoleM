@@ -195,34 +195,26 @@ export default function LiveMonitorPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Live Monitor</h1>
-          <p className="text-sm text-muted-foreground">
-            Real-time exam session monitoring
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant={autoRefresh ? "default" : "outline"}
-            size="sm"
-            onClick={() => setAutoRefresh(!autoRefresh)}
-          >
-            <RefreshCw
-              className={`mr-2 h-4 w-4 ${autoRefresh ? "animate-spin" : ""}`}
-            />
-            {autoRefresh ? "Auto (5s)" : "Manual"}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={fetchActiveSessions}
-            disabled={loading}
-          >
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Refresh
-          </Button>
-        </div>
+      <div className="flex items-center justify-end gap-2">
+        <Button
+          variant={autoRefresh ? "default" : "outline"}
+          size="sm"
+          onClick={() => setAutoRefresh(!autoRefresh)}
+        >
+          <RefreshCw
+            className={`mr-2 h-4 w-4 ${autoRefresh ? "animate-spin" : ""}`}
+          />
+          {autoRefresh ? "Auto (5s)" : "Manual"}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={fetchActiveSessions}
+          disabled={loading}
+        >
+          <RefreshCw className="mr-2 h-4 w-4" />
+          Refresh
+        </Button>
       </div>
 
       {/* Batch selector */}
@@ -328,6 +320,9 @@ export default function LiveMonitorPage() {
                   <TableHead>Candidate</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Remaining Time</TableHead>
+                  <TableHead>IP Address</TableHead>
+                  <TableHead>Device</TableHead>
+                  <TableHead>Browser</TableHead>
                   <TableHead>Connection</TableHead>
                   <TableHead>Reconnects</TableHead>
                   <TableHead>Started At</TableHead>
@@ -340,8 +335,9 @@ export default function LiveMonitorPage() {
                     <TableCell className="font-mono text-xs">
                       {attempt.id.slice(0, 8)}...
                     </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {attempt.candidateId.slice(0, 8)}...
+                    <TableCell className="text-xs">
+                      {attempt.candidateName ??
+                        attempt.candidateId.slice(0, 8) + "..."}
                     </TableCell>
                     <TableCell>
                       <Badge
@@ -357,16 +353,45 @@ export default function LiveMonitorPage() {
                         {formatTime(attempt.remainingTimeSecs)}
                       </span>
                     </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {attempt.ipAddress ?? "—"}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {attempt.deviceName ?? "—"}
+                    </TableCell>
+                    <TableCell
+                      className="max-w-[200px] truncate text-xs text-muted-foreground"
+                      title={attempt.userAgent ?? ""}
+                    >
+                      {attempt.userAgent
+                        ? attempt.userAgent
+                            .replace(
+                              /^Mozilla\/.*?AppleWebKit\/.*?\(([^)]+)\).*$/,
+                              "$1",
+                            )
+                            .slice(0, 40)
+                        : "—"}
+                    </TableCell>
                     <TableCell>
-                      {attempt.isReconnected ? (
+                      {attempt.status === "paused" ? (
+                        <span className="flex items-center gap-1 text-xs text-yellow-600">
+                          <Wifi className="h-3 w-3" />
+                          Paused
+                        </span>
+                      ) : attempt.wsConnected ? (
+                        <span className="flex items-center gap-1 text-xs text-green-600">
+                          <Wifi className="h-3 w-3" />
+                          WebSocket
+                        </span>
+                      ) : attempt.isReconnected ? (
                         <span className="flex items-center gap-1 text-xs text-purple-600">
                           <Wifi className="h-3 w-3" />
                           Reconnected
                         </span>
                       ) : (
-                        <span className="flex items-center gap-1 text-xs text-green-600">
+                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
                           <Wifi className="h-3 w-3" />
-                          Connected
+                          REST Only
                         </span>
                       )}
                     </TableCell>

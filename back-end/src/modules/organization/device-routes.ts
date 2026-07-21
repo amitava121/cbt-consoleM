@@ -1,8 +1,8 @@
-import { and, asc, eq, ilike, sql } from "drizzle-orm";
+import { and, asc, eq, gte, ilike, sql } from "drizzle-orm";
 import { type FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { db } from "../../database/db.js";
-import { centers, deviceRegistrations } from "../../database/schemas/index.js";
+import { deviceRegistrations } from "../../database/schemas/index.js";
 import { requireRole } from "../../middleware/rbac.js";
 
 /* ---------- Zod Schemas ---------- */
@@ -11,7 +11,6 @@ const listQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
   search: z.string().optional(),
-  centerId: z.string().uuid().optional(),
   status: z
     .enum(["registered", "active", "suspended", "decommissioned"])
     .optional(),
@@ -27,18 +26,48 @@ const registerDeviceSchema = z.object({
     .regex(/^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/, "Invalid MAC address"),
   hardwareHash: z.string().min(1).max(255),
   ipAddress: z.string().max(45).optional(),
-  centerId: z.string().uuid().optional().nullable(),
 });
 
 const updateDeviceSchema = z.object({
   deviceName: z.string().max(255).optional(),
   ipAddress: z.string().max(45).optional(),
-  centerId: z.string().uuid().optional().nullable(),
 });
 
 /* ---------- Route Plugin ---------- */
 
+const HEARTBEAT_TIMEOUT_SECS = 60;
+
 const deviceRoutes: FastifyPluginAsync = async (app) => {
+  /* ----- GET /devices/online — list devices with recent heartbeat ----- */
+  app.get(
+    "/online",
+    { preHandler: requireRole("super_admin", "exam_admin") },
+    async (_request, reply) => {
+      const since = new Date(Date.now() - HEARTBEAT_TIMEOUT_SECS * 1000);
+
+      const rows = await db
+        .select({
+          id: deviceRegistrations.id,
+          deviceId: deviceRegistrations.deviceId,
+          deviceName: deviceRegistrations.deviceName,
+          macAddress: deviceRegistrations.macAddress,
+          ipAddress: deviceRegistrations.ipAddress,
+          clientVersion: deviceRegistrations.clientVersion,
+          status: deviceRegistrations.status,
+          lastSeenAt: deviceRegistrations.lastSeenAt,
+        })
+        .from(deviceRegistrations)
+        .where(gte(deviceRegistrations.lastSeenAt, since))
+        .orderBy(asc(deviceRegistrations.lastSeenAt));
+
+      return reply.send({
+        data: rows,
+        total: rows.length,
+        heartbeatTimeoutSecs: HEARTBEAT_TIMEOUT_SECS,
+      });
+    },
+  );
+
   /* ----- GET /devices — list with pagination + filters ----- */
   app.get(
     "/",
@@ -48,7 +77,7 @@ const deviceRoutes: FastifyPluginAsync = async (app) => {
       if (!parsed.success)
         return reply.code(400).send({ error: "Invalid query parameters" });
 
-      const { page, pageSize, search, centerId, status } = parsed.data;
+      const { page, pageSize, search, status } = parsed.data;
       const offset = (page - 1) * pageSize;
 
       const conditions = [];
@@ -60,7 +89,6 @@ const deviceRoutes: FastifyPluginAsync = async (app) => {
           ),
         );
       }
-      if (centerId) conditions.push(eq(deviceRegistrations.centerId, centerId));
       if (status) conditions.push(eq(deviceRegistrations.status, status));
 
       const where = conditions.length > 0 ? and(...conditions) : undefined;
@@ -74,16 +102,14 @@ const deviceRoutes: FastifyPluginAsync = async (app) => {
             macAddress: deviceRegistrations.macAddress,
             hardwareHash: deviceRegistrations.hardwareHash,
             ipAddress: deviceRegistrations.ipAddress,
-            centerId: deviceRegistrations.centerId,
+            clientVersion: deviceRegistrations.clientVersion,
             status: deviceRegistrations.status,
             registeredBy: deviceRegistrations.registeredBy,
             lastSeenAt: deviceRegistrations.lastSeenAt,
             createdAt: deviceRegistrations.createdAt,
             updatedAt: deviceRegistrations.updatedAt,
-            centerName: centers.name,
           })
           .from(deviceRegistrations)
-          .leftJoin(centers, eq(deviceRegistrations.centerId, centers.id))
           .where(where)
           .orderBy(asc(deviceRegistrations.createdAt))
           .limit(pageSize)
@@ -115,14 +141,8 @@ const deviceRoutes: FastifyPluginAsync = async (app) => {
           details: parsed.error.flatten().fieldErrors,
         });
 
-      const {
-        deviceId,
-        deviceName,
-        macAddress,
-        hardwareHash,
-        ipAddress,
-        centerId,
-      } = parsed.data;
+      const { deviceId, deviceName, macAddress, hardwareHash, ipAddress } =
+        parsed.data;
 
       // Atomic insert with ON CONFLICT DO NOTHING — race-safe
       const [device] = await db
@@ -133,7 +153,6 @@ const deviceRoutes: FastifyPluginAsync = async (app) => {
           macAddress,
           hardwareHash,
           ipAddress: ipAddress ?? null,
-          centerId: centerId ?? null,
           registeredBy: request.user.sub,
         })
         .onConflictDoNothing()
@@ -163,16 +182,13 @@ const deviceRoutes: FastifyPluginAsync = async (app) => {
           macAddress: deviceRegistrations.macAddress,
           hardwareHash: deviceRegistrations.hardwareHash,
           ipAddress: deviceRegistrations.ipAddress,
-          centerId: deviceRegistrations.centerId,
           status: deviceRegistrations.status,
           registeredBy: deviceRegistrations.registeredBy,
           lastSeenAt: deviceRegistrations.lastSeenAt,
           createdAt: deviceRegistrations.createdAt,
           updatedAt: deviceRegistrations.updatedAt,
-          centerName: centers.name,
         })
         .from(deviceRegistrations)
-        .leftJoin(centers, eq(deviceRegistrations.centerId, centers.id))
         .where(eq(deviceRegistrations.id, id))
         .limit(1);
 
@@ -195,15 +211,13 @@ const deviceRoutes: FastifyPluginAsync = async (app) => {
           details: parsed.error.flatten().fieldErrors,
         });
 
-      const { deviceName, ipAddress, centerId } = parsed.data;
+      const { deviceName, ipAddress } = parsed.data;
 
-      // Single query: update and return with joined center name using a subquery approach
       const [updated] = await db
         .update(deviceRegistrations)
         .set({
           ...(deviceName !== undefined ? { deviceName } : {}),
           ...(ipAddress !== undefined ? { ipAddress } : {}),
-          ...(centerId !== undefined ? { centerId: centerId ?? null } : {}),
           updatedAt: new Date(),
         })
         .where(eq(deviceRegistrations.id, id))
@@ -220,16 +234,13 @@ const deviceRoutes: FastifyPluginAsync = async (app) => {
           macAddress: deviceRegistrations.macAddress,
           hardwareHash: deviceRegistrations.hardwareHash,
           ipAddress: deviceRegistrations.ipAddress,
-          centerId: deviceRegistrations.centerId,
           status: deviceRegistrations.status,
           registeredBy: deviceRegistrations.registeredBy,
           lastSeenAt: deviceRegistrations.lastSeenAt,
           createdAt: deviceRegistrations.createdAt,
           updatedAt: deviceRegistrations.updatedAt,
-          centerName: centers.name,
         })
         .from(deviceRegistrations)
-        .leftJoin(centers, eq(deviceRegistrations.centerId, centers.id))
         .where(eq(deviceRegistrations.id, id))
         .limit(1);
 
@@ -278,6 +289,24 @@ const deviceRoutes: FastifyPluginAsync = async (app) => {
       if (!updated) return reply.code(404).send({ error: "Device not found" });
 
       return reply.send(updated);
+    },
+  );
+
+  /* ----- DELETE /devices/:id — remove device ----- */
+  app.delete(
+    "/:id",
+    { preHandler: requireRole("super_admin") },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      const [deleted] = await db
+        .delete(deviceRegistrations)
+        .where(eq(deviceRegistrations.id, id))
+        .returning({ id: deviceRegistrations.id });
+
+      if (!deleted) return reply.code(404).send({ error: "Device not found" });
+
+      return reply.send({ id: deleted.id, deleted: true });
     },
   );
 };

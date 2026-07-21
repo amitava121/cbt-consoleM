@@ -1,10 +1,11 @@
 import type {
-  DeviceDetail,
-  DeviceListItem,
-  DeviceStatus,
-  PaginatedResponse,
-  RegisterDeviceInput,
-  UpdateDeviceInput,
+    DeviceDetail,
+    DeviceListItem,
+    DeviceStatus,
+    OnlineDevice,
+    PaginatedResponse,
+    RegisterDeviceInput,
+    UpdateDeviceInput,
 } from "../types/index.js";
 import api from "./api.js";
 
@@ -13,15 +14,19 @@ export const deviceService = {
     page?: number;
     pageSize?: number;
     search?: string;
-    centerId?: string;
     status?: DeviceStatus;
   }) =>
     api.get<unknown, PaginatedResponse<DeviceListItem>>("/devices", {
       params,
     }),
 
-  getById: (id: string) =>
-    api.get<unknown, DeviceDetail>(`/devices/${id}`),
+  getOnline: () =>
+    api.get<
+      unknown,
+      { data: OnlineDevice[]; total: number; heartbeatTimeoutSecs: number }
+    >("/devices/online"),
+
+  getById: (id: string) => api.get<unknown, DeviceDetail>(`/devices/${id}`),
 
   register: (data: RegisterDeviceInput) =>
     api.post<unknown, { id: string }>("/devices", data),
@@ -38,4 +43,7 @@ export const deviceService = {
     api.post<unknown, { id: string; status: DeviceStatus }>(
       `/devices/${id}/activate`,
     ),
+
+  remove: (id: string) =>
+    api.delete<unknown, { id: string; deleted: boolean }>(`/devices/${id}`),
 };

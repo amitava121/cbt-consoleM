@@ -1,9 +1,12 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { type FastifyPluginAsync } from "fastify";
 import { db } from "../../database/db.js";
+import { redis } from "../../database/redis.js";
 import {
     attempts,
+    candidates,
     deviceRegistrations,
+    eventLogs,
     examBatchCandidates,
     examBatches,
     examQuestions,
@@ -13,6 +16,13 @@ import {
     questions,
 } from "../../database/schemas/index.js";
 import { requireRole } from "../../middleware/rbac.js";
+import { verifySebBek } from "../../middleware/seb-verify.js";
+import {
+    cancelAutoSubmit,
+    scheduleAutoSubmit,
+} from "../../services/timer-scheduler.js";
+import { seededShuffle } from "../../utils/shuffle.js";
+import { autoResumeAttempt } from "../sessions/session-service.js";
 
 /**
  * Candidate exam endpoints per API_SPECIFICATION.md Section 5.1.
@@ -29,6 +39,14 @@ const candidateExamRoutes: FastifyPluginAsync = async (app) => {
   // ─── GET /candidate/exams — List assigned exams for the logged-in candidate ───
   app.get("/", async (request, _reply) => {
     const userId = request.user.sub;
+
+    // Look up candidate record from user ID
+    const [candidate] = await db
+      .select({ id: candidates.id })
+      .from(candidates)
+      .where(eq(candidates.userId, userId))
+      .limit(1);
+    if (!candidate) return [];
 
     // Find all exam batches where this candidate is assigned
     const assignments = await db
@@ -50,7 +68,7 @@ const candidateExamRoutes: FastifyPluginAsync = async (app) => {
         eq(examBatches.id, examBatchCandidates.examBatchId),
       )
       .innerJoin(exams, eq(exams.id, examBatches.examId))
-      .where(eq(examBatchCandidates.candidateId, userId));
+      .where(eq(examBatchCandidates.candidateId, candidate.id));
 
     const result = assignments.map((a) => ({
       examBatchId: a.examBatchId,
@@ -70,6 +88,15 @@ const candidateExamRoutes: FastifyPluginAsync = async (app) => {
     const { batchId } = request.params as { batchId: string };
     const userId = request.user.sub;
 
+    // Look up candidate record from user ID
+    const [candidate] = await db
+      .select({ id: candidates.id })
+      .from(candidates)
+      .where(eq(candidates.userId, userId))
+      .limit(1);
+    if (!candidate)
+      return reply.code(403).send({ error: "Candidate record not found" });
+
     // Verify candidate is assigned to this batch
     const [assignment] = await db
       .select()
@@ -77,7 +104,7 @@ const candidateExamRoutes: FastifyPluginAsync = async (app) => {
       .where(
         and(
           eq(examBatchCandidates.examBatchId, batchId),
-          eq(examBatchCandidates.candidateId, userId),
+          eq(examBatchCandidates.candidateId, candidate.id),
         ),
       )
       .limit(1);
@@ -134,205 +161,331 @@ const candidateExamRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // ─── GET /candidate/exams/:batchId/questions — Get exam questions ─────────────
-  app.get("/:batchId/questions", async (request, reply) => {
-    const { batchId } = request.params as { batchId: string };
-    const userId = request.user.sub;
+  app.get(
+    "/:batchId/questions",
+    { preHandler: verifySebBek },
+    async (request, reply) => {
+      const { batchId } = request.params as { batchId: string };
+      const userId = request.user.sub;
 
-    // Verify assignment
-    const [assignment] = await db
-      .select()
-      .from(examBatchCandidates)
-      .where(
-        and(
-          eq(examBatchCandidates.examBatchId, batchId),
-          eq(examBatchCandidates.candidateId, userId),
-        ),
-      )
-      .limit(1);
+      // Look up candidate record from user ID
+      const [candidate] = await db
+        .select({ id: candidates.id })
+        .from(candidates)
+        .where(eq(candidates.userId, userId))
+        .limit(1);
+      if (!candidate)
+        return reply.code(403).send({ error: "Candidate record not found" });
 
-    if (!assignment) {
-      return reply.code(403).send({ error: "Not assigned to this exam batch" });
-    }
-
-    // Get exam ID from batch
-    const [batch] = await db
-      .select({ examId: examBatches.examId, status: examBatches.status })
-      .from(examBatches)
-      .where(eq(examBatches.id, batchId))
-      .limit(1);
-
-    if (!batch) {
-      return reply.code(404).send({ error: "Exam batch not found" });
-    }
-
-    // Get sections
-    const sections = await db
-      .select()
-      .from(examSections)
-      .where(eq(examSections.examId, batch.examId))
-      .orderBy(examSections.sectionOrder);
-
-    if (sections.length === 0) {
-      return [];
-    }
-
-    const sectionIds = sections.map((s) => s.id);
-
-    // Get exam questions with question details
-    const examQs = await db
-      .select({
-        examSectionId: examQuestions.examSectionId,
-        questionId: examQuestions.questionId,
-        displayOrder: examQuestions.displayOrder,
-        marks: examQuestions.marks,
-        negativeMarks: examQuestions.negativeMarks,
-        qType: questions.type,
-        qContent: questions.contentJson,
-        qMediaUrls: questions.mediaUrlsJson,
-      })
-      .from(examQuestions)
-      .innerJoin(questions, eq(examQuestions.questionId, questions.id))
-      .where(inArray(examQuestions.examSectionId, sectionIds))
-      .orderBy(examQuestions.displayOrder);
-
-    // Get options (without isCorrect — never expose to candidate)
-    const questionIds = examQs.map((q) => q.questionId);
-    const optionsMap: Record<
-      string,
-      Array<{
-        id: string;
-        text: string;
-        optionMediaUrl: string | null;
-        displayOrder: number;
-      }>
-    > = {};
-
-    if (questionIds.length > 0) {
-      const opts = await db
+      // Verify assignment
+      const [assignment] = await db
         .select()
-        .from(questionOptions)
-        .where(inArray(questionOptions.questionId, questionIds))
-        .orderBy(questionOptions.displayOrder);
+        .from(examBatchCandidates)
+        .where(
+          and(
+            eq(examBatchCandidates.examBatchId, batchId),
+            eq(examBatchCandidates.candidateId, candidate.id),
+          ),
+        )
+        .limit(1);
 
-      for (const opt of opts) {
-        if (!optionsMap[opt.questionId]) {
-          optionsMap[opt.questionId] = [];
-        }
-        optionsMap[opt.questionId].push({
-          id: opt.id,
-          text: opt.optionText,
-          optionMediaUrl: opt.optionMediaUrl,
-          displayOrder: opt.displayOrder,
-        });
+      if (!assignment) {
+        return reply
+          .code(403)
+          .send({ error: "Not assigned to this exam batch" });
       }
-    }
 
-    // Return in CLIENT_ARCHITECTURE.md Question model format
-    return examQs.map((q) => {
-      const content =
-        typeof q.qContent === "string" ? JSON.parse(q.qContent) : q.qContent;
-      return {
-        id: q.questionId,
-        sectionId: q.examSectionId,
-        type: q.qType,
-        displayOrder: q.displayOrder,
-        marks: q.marks,
-        negativeMarks: q.negativeMarks,
-        content: {
-          text: content?.text ?? "",
-          latex: content?.latex ?? null,
-          passageId: content?.passageId ?? null,
-          imageUrl: content?.imageUrl ?? null,
-          audioUrl: content?.audioUrl ?? null,
-          videoUrl: content?.videoUrl ?? null,
-        },
-        options: optionsMap[q.questionId] ?? null,
-      };
-    });
-  });
+      // Get exam ID and shuffle flags from batch
+      const [batch] = await db
+        .select({
+          examId: examBatches.examId,
+          status: examBatches.status,
+          shuffleQuestions: exams.shuffleQuestions,
+          shuffleOptions: exams.shuffleOptions,
+        })
+        .from(examBatches)
+        .innerJoin(exams, eq(exams.id, examBatches.examId))
+        .where(eq(examBatches.id, batchId))
+        .limit(1);
+
+      if (!batch) {
+        return reply.code(404).send({ error: "Exam batch not found" });
+      }
+
+      // Get the candidate's active attempt to use as shuffle seed
+      const [attempt] = await db
+        .select({ id: attempts.id })
+        .from(attempts)
+        .where(
+          and(
+            eq(attempts.examBatchId, batchId),
+            eq(attempts.candidateId, candidate.id),
+            inArray(attempts.status, ["not_started", "in_progress", "paused"]),
+          ),
+        )
+        .limit(1);
+
+      // Use attempt ID as seed (falls back to candidate ID if no attempt yet)
+      const shuffleSeed = attempt?.id ?? candidate.id;
+
+      // Get sections
+      const sections = await db
+        .select()
+        .from(examSections)
+        .where(eq(examSections.examId, batch.examId))
+        .orderBy(examSections.sectionOrder);
+
+      if (sections.length === 0) {
+        return [];
+      }
+
+      const sectionIds = sections.map((s) => s.id);
+
+      // Get exam questions with question details
+      const examQs = await db
+        .select({
+          examSectionId: examQuestions.examSectionId,
+          questionId: examQuestions.questionId,
+          displayOrder: examQuestions.displayOrder,
+          qType: questions.type,
+          qContent: questions.contentJson,
+          qMediaUrls: questions.mediaUrlsJson,
+        })
+        .from(examQuestions)
+        .innerJoin(questions, eq(examQuestions.questionId, questions.id))
+        .where(inArray(examQuestions.examSectionId, sectionIds))
+        .orderBy(examQuestions.displayOrder);
+
+      // Get options (without isCorrect — never expose to candidate)
+      const questionIds = examQs.map((q) => q.questionId);
+      const optionsMap: Record<
+        string,
+        Array<{
+          id: string;
+          text: string;
+          optionMediaUrl: string | null;
+          displayOrder: number;
+        }>
+      > = {};
+
+      if (questionIds.length > 0) {
+        const opts = await db
+          .select()
+          .from(questionOptions)
+          .where(inArray(questionOptions.questionId, questionIds))
+          .orderBy(questionOptions.displayOrder);
+
+        for (const opt of opts) {
+          if (!optionsMap[opt.questionId]) {
+            optionsMap[opt.questionId] = [];
+          }
+          optionsMap[opt.questionId].push({
+            id: opt.id,
+            text: opt.optionText,
+            optionMediaUrl: opt.optionMediaUrl,
+            displayOrder: opt.displayOrder,
+          });
+        }
+      }
+
+      // Apply shuffle if enabled — shuffle WITHIN each section only, never across sections
+      let shuffledExamQs = examQs;
+      if (batch.shuffleQuestions) {
+        // Group questions by section, shuffle each group independently, then recombine in section order
+        shuffledExamQs = [];
+        for (const section of sections) {
+          const sectionQuestions = examQs.filter(
+            (q) => q.examSectionId === section.id,
+          );
+          if (sectionQuestions.length > 0) {
+            const shuffled = seededShuffle(
+              sectionQuestions,
+              shuffleSeed + ":questions:" + section.id,
+            );
+            shuffledExamQs.push(...shuffled);
+          }
+        }
+      }
+
+      // Return in CLIENT_ARCHITECTURE.md Question model format
+      return shuffledExamQs.map((q) => {
+        const content =
+          typeof q.qContent === "string" ? JSON.parse(q.qContent) : q.qContent;
+        let questionOptions_list = optionsMap[q.questionId] ?? null;
+        if (batch.shuffleOptions && questionOptions_list) {
+          questionOptions_list = seededShuffle(
+            questionOptions_list,
+            shuffleSeed + ":options:" + q.questionId,
+          );
+        }
+        return {
+          id: q.questionId,
+          sectionId: q.examSectionId,
+          type: q.qType,
+          displayOrder: q.displayOrder,
+          content: {
+            text: content?.text ?? "",
+            latex: content?.latex ?? null,
+            passageId: content?.passageId ?? null,
+            imageUrl: content?.imageUrl ?? null,
+            audioUrl: content?.audioUrl ?? null,
+            videoUrl: content?.videoUrl ?? null,
+          },
+          options: questionOptions_list,
+        };
+      });
+    },
+  );
 
   // ─── POST /candidate/exams/:batchId/start — Start exam attempt ────────────────
-  app.post("/:batchId/start", async (request, reply) => {
-    const { batchId } = request.params as { batchId: string };
-    const userId = request.user.sub;
-    const body = (request.body as { deviceId?: string }) ?? {};
+  app.post(
+    "/:batchId/start",
+    { preHandler: verifySebBek },
+    async (request, reply) => {
+      const { batchId } = request.params as { batchId: string };
+      const userId = request.user.sub;
+      const body = (request.body as { deviceId?: string }) ?? {};
 
-    // Verify assignment
-    const [assignment] = await db
-      .select()
-      .from(examBatchCandidates)
-      .where(
-        and(
-          eq(examBatchCandidates.examBatchId, batchId),
-          eq(examBatchCandidates.candidateId, userId),
-        ),
-      )
-      .limit(1);
-
-    if (!assignment) {
-      return reply.code(403).send({ error: "Not assigned to this exam batch" });
-    }
-
-    // Look up the device registration UUID if deviceId string is provided
-    let deviceUuid: string | null = null;
-    if (body.deviceId) {
-      const [device] = await db
-        .select()
-        .from(deviceRegistrations)
-        .where(eq(deviceRegistrations.deviceId, body.deviceId))
+      // Look up candidate record from user ID
+      const [candidate] = await db
+        .select({ id: candidates.id })
+        .from(candidates)
+        .where(eq(candidates.userId, userId))
         .limit(1);
-      deviceUuid = device?.id ?? null;
-    }
+      if (!candidate)
+        return reply.code(403).send({ error: "Candidate record not found" });
 
-    // Get batch + exam info
-    const [batch] = await db
-      .select({
-        batchId: examBatches.id,
-        batchStatus: examBatches.status,
-        examId: examBatches.examId,
-        examDuration: exams.durationMinutes,
-      })
-      .from(examBatches)
-      .innerJoin(exams, eq(exams.id, examBatches.examId))
-      .where(eq(examBatches.id, batchId))
-      .limit(1);
+      // Verify assignment
+      const [assignment] = await db
+        .select()
+        .from(examBatchCandidates)
+        .where(
+          and(
+            eq(examBatchCandidates.examBatchId, batchId),
+            eq(examBatchCandidates.candidateId, candidate.id),
+          ),
+        )
+        .limit(1);
 
-    if (!batch) {
-      return reply.code(404).send({ error: "Exam batch not found" });
-    }
-
-    if (batch.batchStatus !== "active") {
-      return reply.code(423).send({ error: "Exam batch is not active" });
-    }
-
-    // Check for existing attempt
-    const [existingAttempt] = await db
-      .select()
-      .from(attempts)
-      .where(
-        and(
-          eq(attempts.examBatchId, batchId),
-          eq(attempts.candidateId, userId),
-        ),
-      )
-      .limit(1);
-
-    if (existingAttempt) {
-      if (
-        existingAttempt.status === "submitted" ||
-        existingAttempt.status === "auto_submitted"
-      ) {
-        return reply.code(409).send({ error: "Exam already submitted" });
+      if (!assignment) {
+        return reply
+          .code(403)
+          .send({ error: "Not assigned to this exam batch" });
       }
 
-      // Resume existing attempt
+      // Look up the device registration UUID if deviceId string is provided
+      let deviceUuid: string | null = null;
+      if (body.deviceId) {
+        const [device] = await db
+          .select()
+          .from(deviceRegistrations)
+          .where(eq(deviceRegistrations.deviceId, body.deviceId))
+          .limit(1);
+        deviceUuid = device?.id ?? null;
+      }
+
+      // Get batch + exam info
+      const [batch] = await db
+        .select({
+          batchId: examBatches.id,
+          batchStatus: examBatches.status,
+          examId: examBatches.examId,
+          examDuration: exams.durationMinutes,
+        })
+        .from(examBatches)
+        .innerJoin(exams, eq(exams.id, examBatches.examId))
+        .where(eq(examBatches.id, batchId))
+        .limit(1);
+
+      if (!batch) {
+        return reply.code(404).send({ error: "Exam batch not found" });
+      }
+
+      if (batch.batchStatus !== "active") {
+        return reply.code(423).send({ error: "Exam batch is not active" });
+      }
+
+      // Check for existing attempt
+      const [existingAttempt] = await db
+        .select()
+        .from(attempts)
+        .where(
+          and(
+            eq(attempts.examBatchId, batchId),
+            eq(attempts.candidateId, candidate.id),
+          ),
+        )
+        .limit(1);
+
+      if (existingAttempt) {
+        if (
+          existingAttempt.status === "submitted" ||
+          existingAttempt.status === "auto_submitted"
+        ) {
+          return reply.code(409).send({ error: "Exam already submitted" });
+        }
+
+        // Resume existing attempt
+        const durationSecs = (batch.examDuration ?? 180) * 60;
+        const elapsed = existingAttempt.startedAt
+          ? Math.floor(
+              (Date.now() - new Date(existingAttempt.startedAt).getTime()) /
+                1000,
+            )
+          : 0;
+        const remaining = Math.max(0, durationSecs - elapsed);
+
+        // Reschedule auto-submit with updated remaining time
+        await cancelAutoSubmit(existingAttempt.id);
+        const expiryMs = Date.now() + remaining * 1000;
+        await scheduleAutoSubmit(existingAttempt.id, candidate.id, expiryMs);
+
+        // Get sections
+        const sections = await db
+          .select()
+          .from(examSections)
+          .where(eq(examSections.examId, batch.examId))
+          .orderBy(examSections.sectionOrder);
+
+        return {
+          attemptId: existingAttempt.id,
+          examBatchId: batchId,
+          status: existingAttempt.status,
+          startedAt:
+            existingAttempt.startedAt?.toISOString() ??
+            new Date().toISOString(),
+          durationSeconds: durationSecs,
+          remainingTimeSeconds: remaining,
+          sections: sections.map((s) => ({
+            id: s.id,
+            name: s.name,
+            sectionOrder: s.sectionOrder,
+            durationMinutes: s.durationMinutes,
+            questionCount: s.questionCount,
+            totalMarks: s.totalMarks,
+          })),
+        };
+      }
+
+      // Create new attempt
       const durationSecs = (batch.examDuration ?? 180) * 60;
-      const elapsed = existingAttempt.startedAt
-        ? Math.floor(
-            (Date.now() - new Date(existingAttempt.startedAt).getTime()) / 1000,
-          )
-        : 0;
-      const remaining = Math.max(0, durationSecs - elapsed);
+      const now = new Date();
+
+      const [newAttempt] = await db
+        .insert(attempts)
+        .values({
+          examBatchId: batchId,
+          candidateId: candidate.id,
+          deviceId: deviceUuid ?? "00000000-0000-0000-0000-000000000000",
+          status: "in_progress",
+          startedAt: now,
+          remainingTimeSecs: durationSecs,
+        })
+        .returning();
+
+      // Schedule auto-submit in Redis ZSET at exact expiry time
+      const expiryMs = now.getTime() + durationSecs * 1000;
+      await scheduleAutoSubmit(newAttempt.id, candidate.id, expiryMs);
 
       // Get sections
       const sections = await db
@@ -342,13 +495,12 @@ const candidateExamRoutes: FastifyPluginAsync = async (app) => {
         .orderBy(examSections.sectionOrder);
 
       return {
-        attemptId: existingAttempt.id,
+        attemptId: newAttempt.id,
         examBatchId: batchId,
-        status: existingAttempt.status,
-        startedAt:
-          existingAttempt.startedAt?.toISOString() ?? new Date().toISOString(),
+        status: "in_progress",
+        startedAt: now.toISOString(),
         durationSeconds: durationSecs,
-        remainingTimeSeconds: remaining,
+        remainingTimeSeconds: durationSecs,
         sections: sections.map((s) => ({
           id: s.id,
           name: s.name,
@@ -358,47 +510,90 @@ const candidateExamRoutes: FastifyPluginAsync = async (app) => {
           totalMarks: s.totalMarks,
         })),
       };
+    },
+  );
+
+  // ─── POST /candidate/heartbeat — Session liveness + lock refresh ────────────
+  app.post("/heartbeat", async (request, reply) => {
+    const userId = request.user.sub;
+    const jti = request.user.jti;
+
+    const lockKey = `session:lock:${userId}`;
+    const currentLock = await redis.get(lockKey);
+    if (currentLock !== jti) {
+      return reply
+        .code(401)
+        .send({ error: "Session taken over by another login" });
     }
 
-    // Create new attempt
-    const durationSecs = (batch.examDuration ?? 180) * 60;
-    const now = new Date();
+    // Refresh lock TTL
+    await redis.expire(lockKey, 900);
 
-    const [newAttempt] = await db
-      .insert(attempts)
-      .values({
-        examBatchId: batchId,
-        candidateId: userId,
-        deviceId: deviceUuid ?? "00000000-0000-0000-0000-000000000000",
-        status: "in_progress",
-        startedAt: now,
-        remainingTimeSecs: durationSecs,
+    // Verify device fingerprint if provided
+    const clientFp = request.headers["x-device-fp"] as string | undefined;
+    if (clientFp) {
+      const storedFp = await redis.get(`session:fingerprint:${userId}`);
+      if (storedFp && storedFp !== clientFp) {
+        // Log fingerprint mismatch as a violation
+        const [activeAttempt] = await db
+          .select({ id: attempts.id })
+          .from(attempts)
+          .where(
+            and(
+              eq(attempts.candidateId, userId),
+              inArray(attempts.status, ["in_progress", "paused"]),
+            ),
+          )
+          .limit(1);
+        if (activeAttempt) {
+          await db.insert(eventLogs).values({
+            attemptId: activeAttempt.id,
+            eventType: "device_fingerprint_mismatch",
+            eventDataJson: { expected: storedFp, received: clientFp },
+            severity: "high",
+            createdAt: new Date(),
+          });
+        }
+        return reply.code(401).send({ error: "Device changed during exam" });
+      }
+    }
+
+    // Refresh the attempt active key for auto-pause detection
+    // Also auto-resume if the attempt was auto-paused (within grace period)
+    const [activeAttempt] = await db
+      .select({
+        id: attempts.id,
+        status: attempts.status,
       })
-      .returning();
+      .from(attempts)
+      .where(
+        and(
+          eq(attempts.candidateId, userId),
+          inArray(attempts.status, ["in_progress", "paused"]),
+        ),
+      )
+      .limit(1);
 
-    // Get sections
-    const sections = await db
-      .select()
-      .from(examSections)
-      .where(eq(examSections.examId, batch.examId))
-      .orderBy(examSections.sectionOrder);
+    if (activeAttempt) {
+      if (activeAttempt.status === "paused") {
+        // Try to auto-resume (will only succeed within 5-min grace period)
+        const resumed = await autoResumeAttempt(activeAttempt.id);
+        if (resumed) {
+          return {
+            ok: true,
+            autoResumed: true,
+            remainingTimeSecs: resumed.remainingTimeSecs,
+          };
+        }
+        // Grace period expired — stay paused, admin must manually resume
+        return { ok: true, autoResumed: false, paused: true };
+      }
 
-    return {
-      attemptId: newAttempt.id,
-      examBatchId: batchId,
-      status: "in_progress",
-      startedAt: now.toISOString(),
-      durationSeconds: durationSecs,
-      remainingTimeSeconds: durationSecs,
-      sections: sections.map((s) => ({
-        id: s.id,
-        name: s.name,
-        sectionOrder: s.sectionOrder,
-        durationMinutes: s.durationMinutes,
-        questionCount: s.questionCount,
-        totalMarks: s.totalMarks,
-      })),
-    };
+      // in_progress — refresh active key (45s TTL, heartbeat every 30s)
+      await redis.set(`attempt:active:${activeAttempt.id}`, "1", "EX", 45);
+    }
+
+    return { ok: true };
   });
 
   // ─── GET /candidate/exams/:batchId/manifest — Signed exam manifest ────────────

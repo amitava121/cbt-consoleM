@@ -19,7 +19,7 @@ namespace CBT.ExamClient;
 /// <summary>
 /// Application startup and DI configuration.
 /// Follows CLIENT_ARCHITECTURE.md Section 3 (Startup Flow) and DEV_STANDARDS.md Section 2.8.
-/// 
+///
 /// Boot Sequence:
 /// 1. Check for VM (refuse if VM)
 /// 2. Generate hardware hash
@@ -126,6 +126,7 @@ public partial class App : Application
         services.AddSingleton<AnswerInputService>();
         services.AddSingleton<IncidentLogService>();
         services.AddSingleton<AccessibilityService>();
+        services.AddSingleton<DeviceHeartbeatService>();
 
         // Register ViewModels
         services.AddTransient<ViewModels.LoginViewModel>();

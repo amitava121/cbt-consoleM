@@ -1,13 +1,16 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../database/db.js";
+import { redis } from "../../database/redis.js";
 import type { answerStatusEnum } from "../../database/schemas/enums.js";
 import {
     answers,
     attempts,
+    candidates,
     deviceRegistrations,
     eventLogs,
     examBatches,
     exams,
+    users,
     violationReports,
 } from "../../database/schemas/index.js";
 import {
@@ -35,14 +38,11 @@ type AnswerStatus =
 export async function validateDevice(opts: {
   deviceId: string;
   examBatchId: string;
-}): Promise<{ id: string; centerId: string | null }> {
-  // Single JOIN query instead of 2 sequential queries
+}): Promise<{ id: string }> {
   const rows = await db
     .select({
       deviceId: deviceRegistrations.id,
       deviceStatus: deviceRegistrations.status,
-      deviceCenterId: deviceRegistrations.centerId,
-      batchCenterId: examBatches.centerId,
     })
     .from(deviceRegistrations)
     .innerJoin(examBatches, eq(examBatches.id, opts.examBatchId))
@@ -58,15 +58,7 @@ export async function validateDevice(opts: {
     );
   }
 
-  if (
-    r.batchCenterId &&
-    r.deviceCenterId &&
-    r.batchCenterId !== r.deviceCenterId
-  ) {
-    throw new Error("Device center does not match exam batch center");
-  }
-
-  return { id: r.deviceId, centerId: r.deviceCenterId };
+  return { id: r.deviceId };
 }
 
 export async function startOrResumeAttempt(opts: {
@@ -157,6 +149,9 @@ export async function startOrResumeAttempt(opts: {
     const expiryMs = now + remainingTimeSecs * 1000;
     await scheduleAutoSubmit(a.id, a.candidateId, expiryMs);
 
+    // Set active key for disconnect detection (45s TTL, refreshed by heartbeat every 30s)
+    await redis.set(`attempt:active:${a.id}`, "1", "EX", 45);
+
     return {
       attemptId: a.id,
       status: "in_progress",
@@ -211,6 +206,8 @@ export async function startOrResumeAttempt(opts: {
       const expiryMs = now + remainingSecs * 1000;
       await cancelAutoSubmit(a.id);
       await scheduleAutoSubmit(a.id, a.candidateId, expiryMs);
+      // Refresh active key for disconnect detection
+      await redis.set(`attempt:active:${a.id}`, "1", "EX", 45);
     }
 
     await db.insert(eventLogs).values({
@@ -423,6 +420,7 @@ export async function pauseAttempt(
 
   // Cancel the Redis auto-submit timer — attempt is paused
   await cancelAutoSubmit(attemptId);
+  await redis.del(`attempt:active:${attemptId}`);
 
   await db.insert(eventLogs).values({
     attemptId,
@@ -469,6 +467,9 @@ export async function resumeAttempt(
   const expiryMs = now.getTime() + remainingSecs * 1000;
   await scheduleAutoSubmit(attemptId, attempt[0].candidateId, expiryMs);
 
+  // Set active key for disconnect detection
+  await redis.set(`attempt:active:${attemptId}`, "1", "EX", 45);
+
   await db.insert(eventLogs).values({
     attemptId,
     eventType: "session_resumed",
@@ -497,6 +498,7 @@ export async function submitAttempt(
 
   // Cancel any pending auto-submit timer
   await cancelAutoSubmit(attemptId);
+  await redis.del(`attempt:active:${attemptId}`);
 
   await db.insert(eventLogs).values({
     attemptId,
@@ -525,6 +527,7 @@ export async function autoSubmitAttempt(
 
   // Cancel any pending auto-submit timer (in case this was called reactively)
   await cancelAutoSubmit(attemptId);
+  await redis.del(`attempt:active:${attemptId}`);
 
   await db.insert(eventLogs).values({
     attemptId,
@@ -553,6 +556,7 @@ export async function terminateAttempt(
 
   // Cancel any pending auto-submit timer
   await cancelAutoSubmit(attemptId);
+  await redis.del(`attempt:active:${attemptId}`);
 
   await db.insert(eventLogs).values({
     attemptId,
@@ -643,15 +647,145 @@ export async function getRemainingTime(attemptId: string): Promise<{
   return { remainingSecs, status: a.status };
 }
 
+export async function autoPauseAttempt(
+  attemptId: string,
+  reason: string = "Client disconnected",
+): Promise<{ remainingTimeSecs: number } | null> {
+  const attempt = await db
+    .select({
+      status: attempts.status,
+      startedAt: attempts.startedAt,
+      remainingTimeSecs: attempts.remainingTimeSecs,
+    })
+    .from(attempts)
+    .where(eq(attempts.id, attemptId))
+    .limit(1);
+
+  if (attempt.length === 0) return null;
+  if (attempt[0].status !== "in_progress") return null;
+
+  const now = Date.now();
+  const startedAtMs = attempt[0].startedAt?.getTime() ?? now;
+  const elapsedSecs = Math.floor((now - startedAtMs) / 1000);
+  const remainingSecs = Math.max(
+    0,
+    (attempt[0].remainingTimeSecs ?? 0) - elapsedSecs,
+  );
+
+  await db
+    .update(attempts)
+    .set({
+      status: "paused",
+      remainingTimeSecs: remainingSecs,
+      updatedAt: new Date(now),
+    })
+    .where(eq(attempts.id, attemptId));
+
+  await cancelAutoSubmit(attemptId);
+
+  // Record disconnect time in Redis for grace period auto-resume
+  await redis.set(`attempt:disconnect:${attemptId}`, now.toString(), "EX", 300);
+
+  await db.insert(eventLogs).values({
+    attemptId,
+    eventType: "session_auto_paused",
+    eventDataJson: {
+      reason,
+      remainingTimeSecs: remainingSecs,
+      disconnectAt: now,
+    },
+    severity: "warn",
+    createdAt: new Date(now),
+  });
+
+  return { remainingTimeSecs: remainingSecs };
+}
+
+const AUTO_RESUME_GRACE_PERIOD_SECS = 300; // 5 minutes
+
+export async function autoResumeAttempt(
+  attemptId: string,
+): Promise<{ remainingTimeSecs: number } | null> {
+  const attempt = await db
+    .select({
+      status: attempts.status,
+      candidateId: attempts.candidateId,
+      remainingTimeSecs: attempts.remainingTimeSecs,
+    })
+    .from(attempts)
+    .where(eq(attempts.id, attemptId))
+    .limit(1);
+
+  if (attempt.length === 0) return null;
+  if (attempt[0].status !== "paused") return null;
+
+  // Check if within grace period
+  const disconnectTimeStr = await redis.get(`attempt:disconnect:${attemptId}`);
+  if (!disconnectTimeStr) {
+    // Grace period expired or no disconnect record — don't auto-resume
+    return null;
+  }
+
+  const disconnectTime = Number.parseInt(disconnectTimeStr, 10);
+  const elapsedSinceDisconnect = Math.floor(
+    (Date.now() - disconnectTime) / 1000,
+  );
+  if (elapsedSinceDisconnect > AUTO_RESUME_GRACE_PERIOD_SECS) {
+    // Grace period expired — clean up and don't auto-resume
+    await redis.del(`attempt:disconnect:${attemptId}`);
+    return null;
+  }
+
+  const now = new Date();
+  const remainingSecs = attempt[0].remainingTimeSecs ?? 0;
+
+  await db
+    .update(attempts)
+    .set({
+      status: "in_progress",
+      startedAt: now,
+      updatedAt: now,
+    })
+    .where(eq(attempts.id, attemptId));
+
+  // Reschedule auto-submit
+  const expiryMs = now.getTime() + remainingSecs * 1000;
+  await scheduleAutoSubmit(attemptId, attempt[0].candidateId, expiryMs);
+
+  // Set active key for disconnect detection
+  await redis.set(`attempt:active:${attemptId}`, "1", "EX", 45);
+
+  // Clean up disconnect key
+  await redis.del(`attempt:disconnect:${attemptId}`);
+
+  await db.insert(eventLogs).values({
+    attemptId,
+    eventType: "session_auto_resumed",
+    eventDataJson: {
+      remainingTimeSecs: remainingSecs,
+      disconnectDurationSecs: elapsedSinceDisconnect,
+    },
+    severity: "info",
+    createdAt: now,
+  });
+
+  return { remainingTimeSecs: remainingSecs };
+}
+
 export async function getActiveAttempts(examBatchId: string): Promise<
   Array<{
     id: string;
     candidateId: string;
+    candidateName: string | null;
     status: string;
     startedAt: Date | null;
     remainingTimeSecs: number;
     isReconnected: boolean;
     reconnectedCount: number;
+    ipAddress: string | null;
+    userAgent: string | null;
+    deviceId: string | null;
+    deviceName: string | null;
   }>
 > {
   // Single query with computed remaining time — eliminates N+1 getRemainingTime calls
@@ -659,11 +793,16 @@ export async function getActiveAttempts(examBatchId: string): Promise<
     .select({
       id: attempts.id,
       candidateId: attempts.candidateId,
+      candidateName: users.fullName,
       status: attempts.status,
       startedAt: attempts.startedAt,
       remainingTimeSecs: attempts.remainingTimeSecs,
       isReconnected: attempts.isReconnected,
       reconnectedCount: attempts.reconnectedCount,
+      ipAddress: attempts.ipAddress,
+      userAgent: attempts.userAgent,
+      deviceId: attempts.deviceId,
+      deviceName: deviceRegistrations.deviceName,
       computedRemainingSecs: sql<number>`
         CASE
           WHEN ${attempts.status} = 'paused' THEN COALESCE(${attempts.remainingTimeSecs}, 0)
@@ -673,6 +812,12 @@ export async function getActiveAttempts(examBatchId: string): Promise<
       `.as("computed_remaining_secs"),
     })
     .from(attempts)
+    .innerJoin(candidates, eq(candidates.id, attempts.candidateId))
+    .innerJoin(users, eq(users.id, candidates.userId))
+    .leftJoin(
+      deviceRegistrations,
+      eq(deviceRegistrations.id, attempts.deviceId),
+    )
     .where(
       and(
         eq(attempts.examBatchId, examBatchId),
@@ -683,10 +828,15 @@ export async function getActiveAttempts(examBatchId: string): Promise<
   return rows.map((r) => ({
     id: r.id,
     candidateId: r.candidateId,
+    candidateName: r.candidateName,
     status: r.status,
     startedAt: r.startedAt,
     remainingTimeSecs: r.computedRemainingSecs,
     isReconnected: r.isReconnected,
     reconnectedCount: r.reconnectedCount,
+    ipAddress: r.ipAddress,
+    userAgent: r.userAgent,
+    deviceId: r.deviceId,
+    deviceName: r.deviceName,
   }));
 }

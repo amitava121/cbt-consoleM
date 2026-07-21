@@ -12,6 +12,7 @@ import {
     questions,
 } from "../../database/schemas/index.js";
 import { requireRole } from "../../middleware/rbac.js";
+import { seededShuffle } from "../../utils/shuffle.js";
 import { roomManager } from "../../websocket/rooms.js";
 import {
     batchSyncAnswers,
@@ -406,10 +407,16 @@ const sessionRoutes: FastifyPluginAsync = async (app) => {
       // getActiveAttempts now computes remaining time in SQL — no N+1
       const activeAttempts = await getActiveAttempts(query.examBatchId);
 
+      // Enrich with WebSocket connection status
+      const enriched = activeAttempts.map((a) => ({
+        ...a,
+        wsConnected: roomManager.getRoomSize(`attempt:${a.id}`) > 0,
+      }));
+
       return reply.send({
         examBatchId: query.examBatchId,
-        activeCount: activeAttempts.length,
-        attempts: activeAttempts,
+        activeCount: enriched.length,
+        attempts: enriched,
         serverTime: Date.now(),
       });
     },
@@ -456,8 +463,6 @@ const sessionRoutes: FastifyPluginAsync = async (app) => {
             examSectionId: examQuestions.examSectionId,
             questionId: examQuestions.questionId,
             displayOrder: examQuestions.displayOrder,
-            marks: examQuestions.marks,
-            negativeMarks: examQuestions.negativeMarks,
             isOptional: examQuestions.isOptional,
             qId: questions.id,
             qType: questions.type,
@@ -505,22 +510,36 @@ const sessionRoutes: FastifyPluginAsync = async (app) => {
       // Cache exam paper for 5 minutes (immutable during an attempt)
       reply.header("Cache-Control", "private, max-age=300");
 
+      // Apply shuffle if enabled (seeded by attempt ID for per-candidate consistency)
+      const shuffleSeed = attemptId;
+      let shuffledExamQs = examQs;
+      if (examData.shuffleQuestions) {
+        shuffledExamQs = seededShuffle(examQs, shuffleSeed + ":questions");
+      }
+
       return reply.send({
         exam: examData,
         sections,
-        questions: examQs.map((q) => ({
-          examQuestionId: q.eqId,
-          examSectionId: q.examSectionId,
-          questionId: q.questionId,
-          displayOrder: q.displayOrder,
-          marks: q.marks,
-          negativeMarks: q.negativeMarks,
-          isOptional: q.isOptional,
-          type: q.qType,
-          content: q.qText,
-          mediaUrls: q.qMediaUrl,
-          options: optionsMap[q.questionId] ?? [],
-        })),
+        questions: shuffledExamQs.map((q) => {
+          let qOpts = optionsMap[q.questionId] ?? [];
+          if (examData.shuffleOptions && qOpts.length > 0) {
+            qOpts = seededShuffle(
+              qOpts as unknown[],
+              shuffleSeed + ":options:" + q.questionId,
+            );
+          }
+          return {
+            examQuestionId: q.eqId,
+            examSectionId: q.examSectionId,
+            questionId: q.questionId,
+            displayOrder: q.displayOrder,
+            isOptional: q.isOptional,
+            type: q.qType,
+            content: q.qText,
+            mediaUrls: q.qMediaUrl,
+            options: qOpts,
+          };
+        }),
       });
     },
   );

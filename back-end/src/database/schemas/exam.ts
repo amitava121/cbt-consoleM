@@ -10,27 +10,25 @@ import {
     uuid,
     varchar,
 } from "drizzle-orm/pg-core";
-import { questions } from "./academic.js";
+import { questions, subjects } from "./academic.js";
 import {
     examStatusEnum,
     navigationModeEnum,
     selectionStrategyEnum,
 } from "./enums.js";
-import { batches, centers, users } from "./organizational.js";
+import { batches, users } from "./organizational.js";
 
 export const exams = pgTable(
   "exams",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    subjectId: uuid("subject_id").references(() => subjects.id),
+    batchId: uuid("batch_id").references(() => batches.id),
     name: varchar("name", { length: 255 }).notNull(),
     description: text("description"),
     code: varchar("code", { length: 50 }).notNull().unique(),
     durationMinutes: integer("duration_minutes").notNull(),
     totalMarks: decimal("total_marks", { precision: 8, scale: 2 }).notNull(),
-    passingMarks: decimal("passing_marks", { precision: 8, scale: 2 }),
-    hasNegativeMarking: boolean("has_negative_marking")
-      .notNull()
-      .default(false),
     selectionStrategy: selectionStrategyEnum("selection_strategy")
       .notNull()
       .default("static"),
@@ -43,6 +41,9 @@ export const exams = pgTable(
     resultVisibility: varchar("result_visibility", { length: 20 })
       .notNull()
       .default("delayed"),
+    scheduledStartAt: timestamp("scheduled_start_at", {
+      withTimezone: true,
+    }),
     isActive: boolean("is_active").notNull().default(true),
     createdBy: uuid("created_by")
       .notNull()
@@ -54,7 +55,11 @@ export const exams = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (table) => [index("idx_exams_created_by").on(table.createdBy)],
+  (table) => [
+    index("idx_exams_created_by").on(table.createdBy),
+    index("idx_exams_subject_id").on(table.subjectId),
+    index("idx_exams_batch_id").on(table.batchId),
+  ],
 );
 
 export const examSections = pgTable(
@@ -68,12 +73,6 @@ export const examSections = pgTable(
     sectionOrder: integer("section_order").notNull(),
     durationMinutes: integer("duration_minutes"),
     totalMarks: decimal("total_marks", { precision: 8, scale: 2 }).notNull(),
-    negativeMarkingPercentage: decimal("negative_marking_percentage", {
-      precision: 5,
-      scale: 2,
-    })
-      .notNull()
-      .default("0"),
     questionCount: integer("question_count").notNull(),
     navigationMode: navigationModeEnum("navigation_mode"),
     shuffleQuestions: boolean("shuffle_questions").notNull().default(false),
@@ -100,10 +99,6 @@ export const examQuestions = pgTable(
       .notNull()
       .references(() => questions.id),
     displayOrder: integer("display_order").notNull(),
-    marks: decimal("marks", { precision: 6, scale: 2 }).notNull(),
-    negativeMarks: decimal("negative_marks", { precision: 6, scale: 2 })
-      .notNull()
-      .default("0"),
     isOptional: boolean("is_optional").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -123,10 +118,8 @@ export const examBatches = pgTable(
       .notNull()
       .references(() => exams.id),
     batchId: uuid("batch_id").references(() => batches.id),
-    centerId: uuid("center_id").references(() => centers.id),
     name: varchar("name", { length: 255 }).notNull(),
     status: examStatusEnum("status").notNull().default("draft"),
-    shiftNumber: integer("shift_number").notNull().default(1),
     scheduledStartAt: timestamp("scheduled_start_at", {
       withTimezone: true,
     }).notNull(),
@@ -151,24 +144,6 @@ export const examBatches = pgTable(
   (table) => [
     index("idx_exam_batches_exam_id").on(table.examId),
     index("idx_exam_batches_batch_id").on(table.batchId),
-    index("idx_exam_batches_center_id").on(table.centerId),
     index("idx_exam_batches_status").on(table.status),
   ],
-);
-
-export const examSchedules = pgTable(
-  "exam_schedules",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    examBatchId: uuid("exam_batch_id")
-      .notNull()
-      .references(() => examBatches.id),
-    startAt: timestamp("start_at", { withTimezone: true }).notNull(),
-    endAt: timestamp("end_at", { withTimezone: true }).notNull(),
-    isActive: boolean("is_active").notNull().default(true),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (table) => [index("idx_exam_schedules_exam_batch_id").on(table.examBatchId)],
 );

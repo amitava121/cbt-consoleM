@@ -1,0 +1,51 @@
+version: "3.8"
+
+services:
+  seaweedfs-master:
+    image: chrislusf/seaweedfs:3.91
+    command: master -mdir=/data/master -ip=seaweedfs-master -port=9333
+    ports:
+      - "9333:9333"
+    volumes:
+      - seaweedfs-master-data:/data/master
+    restart: unless-stopped
+
+  seaweedfs-volume:
+    image: chrislusf/seaweedfs:3.91
+    command: volume -dir=/data/volume -max=200 -mserver=seaweedfs-master:9333 -port=8080
+    ports:
+      - "8080:8080"
+    volumes:
+      - seaweedfs-volume-data:/data/volume
+    depends_on:
+      - seaweedfs-master
+    restart: unless-stopped
+
+  seaweedfs-filer:
+    image: chrislusf/seaweedfs:3.91
+    command: filer -master=seaweedfs-master:9333 -port=8888 -ip=seaweedfs-filer -defaultStoreDir=/data/filer
+    ports:
+      - "8888:8888"
+      - "18888:18888"
+    volumes:
+      - seaweedfs-filer-data:/data/filer
+    depends_on:
+      - seaweedfs-master
+      - seaweedfs-volume
+    restart: unless-stopped
+
+  seaweedfs-s3:
+    image: chrislusf/seaweedfs:3.91
+    command: s3 -filer=seaweedfs-filer:8888 -ip.bind=0.0.0.0 -port=8333 -config=/etc/seaweedfs/s3.json
+    ports:
+      - "8333:8333"
+    volumes:
+      - ./seaweedfs-s3.json:/etc/seaweedfs/s3.json:ro
+    depends_on:
+      - seaweedfs-filer
+    restart: unless-stopped
+
+volumes:
+  seaweedfs-master-data:
+  seaweedfs-volume-data:
+  seaweedfs-filer-data:

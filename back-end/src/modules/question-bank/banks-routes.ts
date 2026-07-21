@@ -1,8 +1,8 @@
-import { and, desc, eq, ilike, sql } from "drizzle-orm";
+import { desc, eq, ilike, sql } from "drizzle-orm";
 import { type FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { db } from "../../database/db.js";
-import { questionBanks, questions } from "../../database/schemas/index.js";
+import { questionBanks } from "../../database/schemas/index.js";
 import { requireRole } from "../../middleware/rbac.js";
 
 const createBankSchema = z.object({
@@ -19,15 +19,6 @@ const updateBankSchema = z.object({
 const listQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
-  search: z.string().optional(),
-});
-
-const questionsListSchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(20),
-  type: z.string().optional(),
-  difficulty: z.string().optional(),
-  isApproved: z.coerce.boolean().optional(),
   search: z.string().optional(),
 });
 
@@ -104,55 +95,6 @@ const questionBanksRoutes: FastifyPluginAsync = async (app) => {
       if (!updated)
         return reply.code(404).send({ error: "Question bank not found" });
       return updated;
-    },
-  );
-
-  app.get(
-    "/:id/questions",
-    { preHandler: requireRole("super_admin", "exam_admin", "question_author") },
-    async (request, reply) => {
-      const id = (request.params as { id: string }).id;
-      const parsed = questionsListSchema.safeParse(request.query);
-      if (!parsed.success)
-        return reply.code(400).send({ error: "Invalid query parameters" });
-
-      const { page, pageSize, type, difficulty, isApproved, search } =
-        parsed.data;
-      const offset = (page - 1) * pageSize;
-
-      const conditions: ReturnType<typeof eq>[] = [
-        eq(questions.questionBankId, id),
-      ];
-      if (type) conditions.push(eq(questions.type, type as never));
-      if (difficulty)
-        conditions.push(eq(questions.difficulty, difficulty as never));
-      if (isApproved !== undefined) {
-        if (isApproved)
-          conditions.push(sql`${questions.approvedBy} IS NOT NULL`);
-        else conditions.push(sql`${questions.approvedBy} IS NULL`);
-      }
-      if (search)
-        conditions.push(
-          ilike(sql`CAST(${questions.contentJson} AS TEXT)`, `%${search}%`),
-        );
-
-      const where = and(...conditions);
-
-      const [rows, [{ count }]] = await Promise.all([
-        db
-          .select()
-          .from(questions)
-          .where(where)
-          .orderBy(desc(questions.createdAt))
-          .limit(pageSize)
-          .offset(offset),
-        db
-          .select({ count: sql<number>`count(*)::int` })
-          .from(questions)
-          .where(where),
-      ]);
-
-      return { data: rows, total: count, page, pageSize };
     },
   );
 };

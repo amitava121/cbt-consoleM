@@ -1,34 +1,44 @@
-import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+    Activity,
+    ChevronLeft,
+    ChevronRight,
+    Loader2,
+    Monitor,
+    Search,
+    Settings,
+    Shield,
+} from "lucide-react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import {
-  systemService,
-  type UpdateSettingInput,
-  type UpdatePolicyInput,
-} from "../services/system";
-import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
+    Dialog,
+    DialogContent,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
 } from "../components/ui/dialog";
+import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from "../components/ui/table";
 import { Textarea } from "../components/ui/textarea";
-import { ChevronLeft, ChevronRight, Search, Loader2, Settings, Shield, Activity } from "lucide-react";
+import { sebService, type SebSettings } from "../services/seb";
+import {
+    systemService,
+    type UpdatePolicyInput,
+    type UpdateSettingInput,
+} from "../services/system";
 
-type Tab = "settings" | "policies" | "health";
+type Tab = "settings" | "policies" | "health" | "seb";
 
 export default function SystemSettingsPage() {
   const [tab, setTab] = useState<Tab>("settings");
@@ -45,13 +55,23 @@ export default function SystemSettingsPage() {
 
   const settingsQuery = useQuery({
     queryKey: ["system-settings", page, pageSize, search],
-    queryFn: () => systemService.listSettings({ page, pageSize, search: search || undefined }),
+    queryFn: () =>
+      systemService.listSettings({
+        page,
+        pageSize,
+        search: search || undefined,
+      }),
     enabled: tab === "settings",
   });
 
   const policiesQuery = useQuery({
     queryKey: ["security-policies", page, pageSize, search],
-    queryFn: () => systemService.listPolicies({ page, pageSize, search: search || undefined }),
+    queryFn: () =>
+      systemService.listPolicies({
+        page,
+        pageSize,
+        search: search || undefined,
+      }),
     enabled: tab === "policies",
   });
 
@@ -84,7 +104,11 @@ export default function SystemSettingsPage() {
     onError: () => toast.error("Failed to update security policy"),
   });
 
-  const handleEditSetting = (key: string, currentValue: string, currentDesc: string | null) => {
+  const handleEditSetting = (
+    key: string,
+    currentValue: string,
+    currentDesc: string | null,
+  ) => {
     setEditingSetting(key);
     setSettingValue(currentValue);
     setSettingDesc(currentDesc ?? "");
@@ -98,7 +122,11 @@ export default function SystemSettingsPage() {
     });
   };
 
-  const handleEditPolicy = (id: string, json: Record<string, unknown>, isActive: boolean) => {
+  const handleEditPolicy = (
+    id: string,
+    json: Record<string, unknown>,
+    isActive: boolean,
+  ) => {
     setEditingPolicy(id);
     setPolicyJson(JSON.stringify(json, null, 2));
     setPolicyActive(isActive);
@@ -124,13 +152,6 @@ export default function SystemSettingsPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold">System Settings</h1>
-        <p className="text-sm text-muted-foreground">
-          Manage system configuration, security policies, and health monitoring
-        </p>
-      </div>
-
       <div className="flex gap-2 border-b">
         <Button
           variant={tab === "settings" ? "default" : "ghost"}
@@ -155,6 +176,14 @@ export default function SystemSettingsPage() {
         >
           <Activity className="mr-2 h-4 w-4" />
           Health
+        </Button>
+        <Button
+          variant={tab === "seb" ? "default" : "ghost"}
+          size="sm"
+          onClick={() => setTab("seb")}
+        >
+          <Monitor className="mr-2 h-4 w-4" />
+          SEB Settings
         </Button>
       </div>
 
@@ -196,15 +225,22 @@ export default function SystemSettingsPage() {
                   <TableBody>
                     {settingsQuery.data?.data.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                        <TableCell
+                          colSpan={6}
+                          className="text-center text-muted-foreground py-8"
+                        >
                           No settings found
                         </TableCell>
                       </TableRow>
                     ) : (
                       settingsQuery.data?.data.map((s) => (
                         <TableRow key={s.id}>
-                          <TableCell className="font-mono text-sm font-medium">{s.key}</TableCell>
-                          <TableCell className="font-mono text-sm">{s.value}</TableCell>
+                          <TableCell className="font-mono text-sm font-medium">
+                            {s.key}
+                          </TableCell>
+                          <TableCell className="font-mono text-sm">
+                            {s.value}
+                          </TableCell>
                           <TableCell>
                             <Badge variant="outline">{s.valueType}</Badge>
                           </TableCell>
@@ -212,7 +248,9 @@ export default function SystemSettingsPage() {
                             {s.description ?? "-"}
                           </TableCell>
                           <TableCell>
-                            <Badge variant={s.isEditable ? "default" : "secondary"}>
+                            <Badge
+                              variant={s.isEditable ? "default" : "secondary"}
+                            >
                               {s.isEditable ? "Yes" : "No"}
                             </Badge>
                           </TableCell>
@@ -221,7 +259,9 @@ export default function SystemSettingsPage() {
                               variant="ghost"
                               size="sm"
                               disabled={!s.isEditable}
-                              onClick={() => handleEditSetting(s.key, s.value, s.description)}
+                              onClick={() =>
+                                handleEditSetting(s.key, s.value, s.description)
+                              }
                             >
                               Edit
                             </Button>
@@ -265,23 +305,32 @@ export default function SystemSettingsPage() {
                   <TableBody>
                     {policiesQuery.data?.data.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                        <TableCell
+                          colSpan={5}
+                          className="text-center text-muted-foreground py-8"
+                        >
                           No security policies found
                         </TableCell>
                       </TableRow>
                     ) : (
                       policiesQuery.data?.data.map((p) => (
                         <TableRow key={p.id}>
-                          <TableCell className="font-medium">{p.policyName}</TableCell>
+                          <TableCell className="font-medium">
+                            {p.policyName}
+                          </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
                             {p.description ?? "-"}
                           </TableCell>
                           <TableCell className="text-sm font-mono">
                             {JSON.stringify(p.settingsJson).slice(0, 60)}
-                            {JSON.stringify(p.settingsJson).length > 60 ? "..." : ""}
+                            {JSON.stringify(p.settingsJson).length > 60
+                              ? "..."
+                              : ""}
                           </TableCell>
                           <TableCell>
-                            <Badge variant={p.isActive ? "default" : "secondary"}>
+                            <Badge
+                              variant={p.isActive ? "default" : "secondary"}
+                            >
                               {p.isActive ? "Active" : "Inactive"}
                             </Badge>
                           </TableCell>
@@ -289,7 +338,13 @@ export default function SystemSettingsPage() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => handleEditPolicy(p.id, p.settingsJson, p.isActive)}
+                              onClick={() =>
+                                handleEditPolicy(
+                                  p.id,
+                                  p.settingsJson,
+                                  p.isActive,
+                                )
+                              }
                             >
                               Edit
                             </Button>
@@ -324,25 +379,39 @@ export default function SystemSettingsPage() {
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Status</span>
-                    <Badge variant={healthQuery.data.database.status === "ok" ? "default" : "destructive"}>
+                    <Badge
+                      variant={
+                        healthQuery.data.database.status === "ok"
+                          ? "default"
+                          : "destructive"
+                      }
+                    >
                       {healthQuery.data.database.status}
                     </Badge>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Latency</span>
-                    <span className="font-mono">{healthQuery.data.database.latencyMs ?? "N/A"}ms</span>
+                    <span className="font-mono">
+                      {healthQuery.data.database.latencyMs ?? "N/A"}ms
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Pool Total</span>
-                    <span className="font-mono">{healthQuery.data.database.pool.total}</span>
+                    <span className="font-mono">
+                      {healthQuery.data.database.pool.total}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Pool Idle</span>
-                    <span className="font-mono">{healthQuery.data.database.pool.idle}</span>
+                    <span className="font-mono">
+                      {healthQuery.data.database.pool.idle}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Pool Waiting</span>
-                    <span className="font-mono">{healthQuery.data.database.pool.waiting}</span>
+                    <span className="font-mono">
+                      {healthQuery.data.database.pool.waiting}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -352,19 +421,27 @@ export default function SystemSettingsPage() {
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">RSS</span>
-                    <span className="font-mono">{healthQuery.data.memory.rssMB} MB</span>
+                    <span className="font-mono">
+                      {healthQuery.data.memory.rssMB} MB
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Heap Used</span>
-                    <span className="font-mono">{healthQuery.data.memory.heapUsedMB} MB</span>
+                    <span className="font-mono">
+                      {healthQuery.data.memory.heapUsedMB} MB
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Heap Total</span>
-                    <span className="font-mono">{healthQuery.data.memory.heapTotalMB} MB</span>
+                    <span className="font-mono">
+                      {healthQuery.data.memory.heapTotalMB} MB
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">External</span>
-                    <span className="font-mono">{healthQuery.data.memory.externalMB} MB</span>
+                    <span className="font-mono">
+                      {healthQuery.data.memory.externalMB} MB
+                    </span>
                   </div>
                 </div>
               </div>
@@ -374,23 +451,34 @@ export default function SystemSettingsPage() {
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">PID</span>
-                    <span className="font-mono">{healthQuery.data.process.pid}</span>
+                    <span className="font-mono">
+                      {healthQuery.data.process.pid}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Node Version</span>
-                    <span className="font-mono">{healthQuery.data.process.nodeVersion}</span>
+                    <span className="font-mono">
+                      {healthQuery.data.process.nodeVersion}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Platform</span>
-                    <span className="font-mono">{healthQuery.data.process.platform}</span>
+                    <span className="font-mono">
+                      {healthQuery.data.process.platform}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Uptime</span>
-                    <span className="font-mono">{Math.floor(healthQuery.data.uptime / 60)}m {healthQuery.data.uptime % 60}s</span>
+                    <span className="font-mono">
+                      {Math.floor(healthQuery.data.uptime / 60)}m{" "}
+                      {healthQuery.data.uptime % 60}s
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Environment</span>
-                    <span className="font-mono">{healthQuery.data.environment}</span>
+                    <span className="font-mono">
+                      {healthQuery.data.environment}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -400,14 +488,22 @@ export default function SystemSettingsPage() {
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Status</span>
-                    <Badge variant={healthQuery.data.status === "ok" ? "default" : "destructive"}>
+                    <Badge
+                      variant={
+                        healthQuery.data.status === "ok"
+                          ? "default"
+                          : "destructive"
+                      }
+                    >
                       {healthQuery.data.status}
                     </Badge>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Timestamp</span>
                     <span className="font-mono text-xs">
-                      {new Date(healthQuery.data.timestamp).toLocaleString("en-IN")}
+                      {new Date(healthQuery.data.timestamp).toLocaleString(
+                        "en-IN",
+                      )}
                     </span>
                   </div>
                 </div>
@@ -417,8 +513,13 @@ export default function SystemSettingsPage() {
         </>
       )}
 
+      {tab === "seb" && <SebSettingsTab />}
+
       {/* Edit Setting Dialog */}
-      <Dialog open={editingSetting !== null} onOpenChange={(open) => !open && setEditingSetting(null)}>
+      <Dialog
+        open={editingSetting !== null}
+        onOpenChange={(open) => !open && setEditingSetting(null)}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Edit Setting: {editingSetting}</DialogTitle>
@@ -445,8 +546,13 @@ export default function SystemSettingsPage() {
             <Button variant="outline" onClick={() => setEditingSetting(null)}>
               Cancel
             </Button>
-            <Button onClick={handleSaveSetting} disabled={updateSettingMutation.isPending}>
-              {updateSettingMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            <Button
+              onClick={handleSaveSetting}
+              disabled={updateSettingMutation.isPending}
+            >
+              {updateSettingMutation.isPending && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
               Save
             </Button>
           </DialogFooter>
@@ -454,7 +560,10 @@ export default function SystemSettingsPage() {
       </Dialog>
 
       {/* Edit Policy Dialog */}
-      <Dialog open={editingPolicy !== null} onOpenChange={(open) => !open && setEditingPolicy(null)}>
+      <Dialog
+        open={editingPolicy !== null}
+        onOpenChange={(open) => !open && setEditingPolicy(null)}
+      >
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Edit Security Policy</DialogTitle>
@@ -484,13 +593,281 @@ export default function SystemSettingsPage() {
             <Button variant="outline" onClick={() => setEditingPolicy(null)}>
               Cancel
             </Button>
-            <Button onClick={handleSavePolicy} disabled={updatePolicyMutation.isPending}>
-              {updatePolicyMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            <Button
+              onClick={handleSavePolicy}
+              disabled={updatePolicyMutation.isPending}
+            >
+              {updatePolicyMutation.isPending && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
               Save
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function SebSettingsTab() {
+  const queryClient = useQueryClient();
+  const [form, setForm] = useState<SebSettings>({
+    enabled: false,
+    requireBek: true,
+    startUrl: "",
+    quitUrl: "",
+    quitPassword: "",
+    allowQuit: true,
+    allowReload: false,
+    showTime: true,
+    showKeyboardLayout: false,
+    allowSpellCheck: false,
+    allowZoom: true,
+    blockScreenCapture: true,
+    blockScreenSharing: true,
+    allowDeveloperConsole: false,
+    muteAudio: false,
+    allowWindowResize: false,
+    blockedProcesses: [
+      "TeamViewer",
+      "AnyDesk",
+      "Chrome Remote Desktop",
+      "Skype",
+      "Zoom",
+      "Discord",
+      "Snipping Tool",
+      "OBS Studio",
+    ],
+    urlFilterRules: [
+      { action: "allow", url: "localhost", description: "Allow backend API" },
+      { action: "allow", url: "127.0.0.1", description: "Allow local backend" },
+    ],
+  });
+  const [blockedProcessesText, setBlockedProcessesText] = useState("");
+
+  const sebQuery = useQuery({
+    queryKey: ["seb-settings"],
+    queryFn: sebService.getSettings,
+  });
+
+  // Sync form when data loads
+  useEffect(() => {
+    if (sebQuery.data) {
+      setForm(sebQuery.data);
+      setBlockedProcessesText(
+        (sebQuery.data.blockedProcesses ?? []).join("\n"),
+      );
+    }
+  }, [sebQuery.data]);
+
+  const saveMutation = useMutation({
+    mutationFn: (data: SebSettings) => sebService.saveSettings(data),
+    onSuccess: () => {
+      toast.success("SEB settings saved successfully");
+      queryClient.invalidateQueries({ queryKey: ["seb-settings"] });
+    },
+    onError: () => toast.error("Failed to save SEB settings"),
+  });
+
+  const handleSave = () => {
+    const processes = blockedProcessesText
+      .split("\n")
+      .map((p) => p.trim())
+      .filter(Boolean);
+    saveMutation.mutate({ ...form, blockedProcesses: processes });
+  };
+
+  const toggle = (key: keyof SebSettings) => {
+    setForm((prev) => ({ ...prev, [key]: !prev[key] as never }));
+  };
+
+  if (sebQuery.isLoading) {
+    return (
+      <div className="flex justify-center py-8">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  const toggles: {
+    key: keyof SebSettings;
+    label: string;
+    description: string;
+  }[] = [
+    {
+      key: "enabled",
+      label: "Enable SEB",
+      description: "Require Safe Exam Browser for all exams",
+    },
+    {
+      key: "requireBek",
+      label: "Require Browser Exam Key",
+      description: "Reject SEB requests without valid BEK header",
+    },
+    {
+      key: "allowQuit",
+      label: "Allow Quit",
+      description: "Allow students to quit SEB during exam",
+    },
+    {
+      key: "allowReload",
+      label: "Allow Reload",
+      description: "Allow page reload inside SEB",
+    },
+    {
+      key: "showTime",
+      label: "Show Time",
+      description: "Display clock in SEB",
+    },
+    {
+      key: "showKeyboardLayout",
+      label: "Show Keyboard Layout",
+      description: "Show keyboard layout switcher",
+    },
+    {
+      key: "allowSpellCheck",
+      label: "Allow Spell Check",
+      description: "Enable spell checking in SEB",
+    },
+    {
+      key: "allowZoom",
+      label: "Allow Zoom",
+      description: "Allow zoom in/out in SEB",
+    },
+    {
+      key: "allowWindowResize",
+      label: "Allow Window Resize",
+      description: "Allow resizing the SEB window",
+    },
+    {
+      key: "blockScreenCapture",
+      label: "Block Screen Capture",
+      description: "Prevent screen capture tools",
+    },
+    {
+      key: "blockScreenSharing",
+      label: "Block Screen Sharing",
+      description: "Prevent screen sharing apps",
+    },
+    {
+      key: "allowDeveloperConsole",
+      label: "Allow Developer Console",
+      description: "Allow dev tools (not recommended)",
+    },
+    {
+      key: "muteAudio",
+      label: "Mute Audio",
+      description: "Mute all audio in SEB",
+    },
+  ];
+
+  return (
+    <div className="space-y-6 max-w-3xl">
+      <div className="rounded-lg border p-4 bg-muted/30">
+        <div className="flex items-center gap-2 mb-2">
+          <Monitor className="h-5 w-5 text-primary" />
+          <h3 className="text-lg font-semibold">
+            Safe Exam Browser Configuration
+          </h3>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          These settings apply globally to all exam batches. When SEB is
+          enabled, candidates must launch exams through Safe Exam Browser.
+        </p>
+      </div>
+
+      {/* Toggle switches */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        {toggles.map((t) => (
+          <div
+            key={t.key}
+            className="flex items-start justify-between rounded-lg border p-3"
+          >
+            <div className="mr-3">
+              <p className="text-sm font-medium">{t.label}</p>
+              <p className="text-xs text-muted-foreground">{t.description}</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={form[t.key] as boolean}
+              onClick={() => toggle(t.key)}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                form[t.key] ? "bg-primary" : "bg-input"
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-background shadow-lg ring-0 transition-transform ${
+                  form[t.key] ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {/* URL fields */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-2">
+          <Label htmlFor="seb-start-url">Start URL (optional)</Label>
+          <Input
+            id="seb-start-url"
+            value={form.startUrl}
+            onChange={(e) => setForm({ ...form, startUrl: e.target.value })}
+            placeholder="https://exam.example.com/exam"
+          />
+          <p className="text-xs text-muted-foreground">
+            Leave empty to auto-detect from request
+          </p>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="seb-quit-url">Quit URL (optional)</Label>
+          <Input
+            id="seb-quit-url"
+            value={form.quitUrl}
+            onChange={(e) => setForm({ ...form, quitUrl: e.target.value })}
+            placeholder="https://exam.example.com/quit"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="seb-quit-password">Quit Password (optional)</Label>
+          <Input
+            id="seb-quit-password"
+            type="password"
+            value={form.quitPassword ?? ""}
+            onChange={(e) => setForm({ ...form, quitPassword: e.target.value })}
+            placeholder="Password required to quit SEB"
+          />
+        </div>
+      </div>
+
+      {/* Blocked processes */}
+      <div className="space-y-2">
+        <Label htmlFor="seb-blocked-processes">
+          Blocked Processes (one per line)
+        </Label>
+        <Textarea
+          id="seb-blocked-processes"
+          value={blockedProcessesText}
+          onChange={(e) => setBlockedProcessesText(e.target.value)}
+          rows={6}
+          placeholder="TeamViewer&#10;AnyDesk&#10;Zoom"
+          className="font-mono text-sm"
+        />
+        <p className="text-xs text-muted-foreground">
+          These applications will be blocked while SEB is running
+        </p>
+      </div>
+
+      {/* Save button */}
+      <div className="flex justify-end">
+        <Button onClick={handleSave} disabled={saveMutation.isPending}>
+          {saveMutation.isPending && (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          )}
+          Save SEB Settings
+        </Button>
+      </div>
     </div>
   );
 }

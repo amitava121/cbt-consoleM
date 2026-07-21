@@ -1,30 +1,37 @@
-import { and, asc, eq, ilike, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
+import ExcelJS from "exceljs";
 import { type FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { db } from "../../database/db.js";
+import { proctoringConfigs } from "../../database/schemas/config.js";
 import {
+    attempts,
+    batches,
+    examBatchCandidates,
+    examBatches,
     examQuestions,
-    examSections,
     exams,
+    examSections,
+    institutions,
+    questionOptions,
     questions,
+    questionVersions,
+    subjects,
 } from "../../database/schemas/index.js";
+import { analyticsSnapshots } from "../../database/schemas/results.js";
 import { requireRole } from "../../middleware/rbac.js";
 
 /* ---------- Schemas ---------- */
 
 const createExamSchema = z.object({
+  subjectId: z.string().uuid().optional().nullable(),
+  batchId: z.string().uuid().optional().nullable(),
   name: z.string().min(1).max(255),
   code: z.string().min(1).max(50),
   description: z.string().optional().nullable(),
   durationMinutes: z.number().int().min(1),
   totalMarks: z.coerce.number().min(0).transform(String),
-  passingMarks: z.coerce
-    .number()
-    .min(0)
-    .optional()
-    .nullable()
-    .transform((v) => (v !== null && v !== undefined ? String(v) : v)),
-  hasNegativeMarking: z.boolean().default(false),
   selectionStrategy: z.enum(["static", "random", "hybrid"]).default("static"),
   navigationMode: z.enum(["free", "linear", "section_free"]).default("free"),
   shuffleQuestions: z.boolean().default(false),
@@ -38,6 +45,12 @@ const createExamSchema = z.object({
     .optional()
     .nullable(),
   resultVisibility: z.string().max(20).default("delayed"),
+  scheduledStartAt: z
+    .string()
+    .datetime()
+    .optional()
+    .nullable()
+    .transform((v) => (v ? new Date(v) : v)),
 });
 
 const updateExamSchema = createExamSchema.partial();
@@ -47,12 +60,6 @@ const createSectionSchema = z.object({
   sectionOrder: z.number().int().min(1),
   durationMinutes: z.number().int().min(1).optional().nullable(),
   totalMarks: z.coerce.number().min(0).transform(String),
-  negativeMarkingPercentage: z.coerce
-    .number()
-    .min(0)
-    .max(100)
-    .default(0)
-    .transform(String),
   questionCount: z.number().int().min(1),
   navigationMode: z
     .enum(["free", "linear", "section_free"])
@@ -67,14 +74,10 @@ const updateSectionSchema = createSectionSchema.partial();
 
 const addExamQuestionsSchema = z.object({
   questionIds: z.array(z.string().uuid()).min(1),
-  marks: z.coerce.number().min(0),
-  negativeMarks: z.coerce.number().min(0).default(0),
   isOptional: z.boolean().default(false),
 });
 
 const updateExamQuestionSchema = z.object({
-  marks: z.coerce.number().min(0).optional(),
-  negativeMarks: z.coerce.number().min(0).optional(),
   isOptional: z.boolean().optional(),
   displayOrder: z.number().int().min(1).optional(),
 });
@@ -90,6 +93,9 @@ const examRoutes: FastifyPluginAsync = async (app) => {
       page?: string;
       pageSize?: string;
       search?: string;
+      subjectId?: string;
+      institutionId?: string;
+      batchId?: string;
     };
     const page = Math.max(1, parseInt(query.page ?? "1"));
     const pageSize = Math.min(
@@ -102,21 +108,56 @@ const examRoutes: FastifyPluginAsync = async (app) => {
     if (search && search.length >= 3) {
       conditions.push(ilike(exams.name, `%${search}%`));
     }
+    if (query.subjectId) {
+      conditions.push(eq(exams.subjectId, query.subjectId));
+    }
+    if (query.institutionId) {
+      conditions.push(eq(subjects.institutionId, query.institutionId));
+    }
+    if (query.batchId) {
+      conditions.push(eq(exams.batchId, query.batchId));
+    }
 
     const where = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = (page - 1) * pageSize;
 
     const [rows, countResult] = await Promise.all([
       db
-        .select()
+        .select({
+          id: exams.id,
+          subjectId: exams.subjectId,
+          batchId: exams.batchId,
+          name: exams.name,
+          description: exams.description,
+          code: exams.code,
+          durationMinutes: exams.durationMinutes,
+          totalMarks: exams.totalMarks,
+          selectionStrategy: exams.selectionStrategy,
+          navigationMode: exams.navigationMode,
+          shuffleQuestions: exams.shuffleQuestions,
+          shuffleOptions: exams.shuffleOptions,
+          instructionsJson: exams.instructionsJson,
+          resultVisibility: exams.resultVisibility,
+          scheduledStartAt: exams.scheduledStartAt,
+          isActive: exams.isActive,
+          createdBy: exams.createdBy,
+          createdAt: exams.createdAt,
+          updatedAt: exams.updatedAt,
+          subjectName: subjects.name,
+          batchName: batches.name,
+        })
         .from(exams)
+        .leftJoin(subjects, eq(exams.subjectId, subjects.id))
+        .leftJoin(batches, eq(exams.batchId, batches.id))
         .where(where)
-        .orderBy(asc(exams.createdAt))
+        .orderBy(desc(exams.createdAt))
         .limit(pageSize)
         .offset(offset),
       db
         .select({ count: sql<number>`COUNT(*)::int` })
         .from(exams)
+        .leftJoin(subjects, eq(exams.subjectId, subjects.id))
+        .leftJoin(batches, eq(exams.batchId, batches.id))
         .where(where),
     ]);
 
@@ -137,16 +178,62 @@ const examRoutes: FastifyPluginAsync = async (app) => {
         details: parsed.error.flatten().fieldErrors,
       });
 
-    const { instructions, ...examFields } = parsed.data;
+    const { instructions, subjectId, ...examFields } = parsed.data;
+
+    // If subjectId is provided, fetch questions for that subject
+    let subjectQuestions: {
+      id: string;
+    }[] = [];
+    if (subjectId) {
+      subjectQuestions = await db
+        .select({
+          id: questions.id,
+        })
+        .from(questions)
+        .where(eq(questions.subjectId, subjectId));
+
+      if (subjectQuestions.length === 0) {
+        return reply.code(400).send({
+          error:
+            "Cannot create exam: the selected subject has no questions. Add questions to the subject first.",
+        });
+      }
+    }
 
     const [exam] = await db
       .insert(exams)
       .values({
         ...examFields,
+        subjectId: subjectId ?? null,
         instructionsJson: (instructions as Record<string, unknown>) ?? null,
         createdBy: request.user.sub,
       } as typeof exams.$inferInsert)
       .returning();
+
+    // Auto-create a section and add all subject questions
+    if (subjectId && subjectQuestions.length > 0) {
+      const totalMarks = subjectQuestions.length;
+
+      const [section] = await db
+        .insert(examSections)
+        .values({
+          examId: exam.id,
+          name: "Section 1",
+          sectionOrder: 1,
+          totalMarks: String(totalMarks),
+          questionCount: subjectQuestions.length,
+        } as typeof examSections.$inferInsert)
+        .returning();
+
+      const questionValues = subjectQuestions.map((q, idx) => ({
+        examSectionId: section.id,
+        questionId: q.id,
+        displayOrder: idx + 1,
+        isOptional: false,
+      }));
+
+      await db.insert(examQuestions).values(questionValues);
+    }
 
     return reply.code(201).send(exam);
   });
@@ -155,7 +242,41 @@ const examRoutes: FastifyPluginAsync = async (app) => {
   app.get("/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
 
-    const [exam] = await db.select().from(exams).where(eq(exams.id, id));
+    const batchInst = alias(institutions, "batch_inst");
+    const subjInst = alias(institutions, "subj_inst");
+
+    const [exam] = await db
+      .select({
+        id: exams.id,
+        subjectId: exams.subjectId,
+        batchId: exams.batchId,
+        name: exams.name,
+        description: exams.description,
+        code: exams.code,
+        durationMinutes: exams.durationMinutes,
+        totalMarks: exams.totalMarks,
+        selectionStrategy: exams.selectionStrategy,
+        navigationMode: exams.navigationMode,
+        shuffleQuestions: exams.shuffleQuestions,
+        shuffleOptions: exams.shuffleOptions,
+        instructionsJson: exams.instructionsJson,
+        resultVisibility: exams.resultVisibility,
+        scheduledStartAt: exams.scheduledStartAt,
+        isActive: exams.isActive,
+        createdBy: exams.createdBy,
+        createdAt: exams.createdAt,
+        updatedAt: exams.updatedAt,
+        subjectName: subjects.name,
+        batchName: batches.name,
+        institutionName: sql<string>`COALESCE(${batchInst.name}, ${subjInst.name})`,
+        institutionId: sql<string>`COALESCE(${batchInst.id}, ${subjInst.id})`,
+      })
+      .from(exams)
+      .leftJoin(subjects, eq(exams.subjectId, subjects.id))
+      .leftJoin(batches, eq(exams.batchId, batches.id))
+      .leftJoin(batchInst, eq(batches.institutionId, batchInst.id))
+      .leftJoin(subjInst, eq(subjects.institutionId, subjInst.id))
+      .where(eq(exams.id, id));
     if (!exam) return reply.code(404).send({ error: "Exam not found" });
 
     const sections = await db
@@ -171,9 +292,14 @@ const examRoutes: FastifyPluginAsync = async (app) => {
       examSectionId: string;
       questionId: string;
       displayOrder: number;
-      marks: string;
-      negativeMarks: string;
       isOptional: boolean;
+      type: string;
+      contentJson: unknown;
+      options?: {
+        optionText: string;
+        isCorrect: boolean;
+        displayOrder: number;
+      }[];
     }[] = [];
     if (sectionIds.length > 0) {
       sectionQuestions = await db
@@ -182,13 +308,42 @@ const examRoutes: FastifyPluginAsync = async (app) => {
           examSectionId: examQuestions.examSectionId,
           questionId: examQuestions.questionId,
           displayOrder: examQuestions.displayOrder,
-          marks: examQuestions.marks,
-          negativeMarks: examQuestions.negativeMarks,
           isOptional: examQuestions.isOptional,
+          type: questions.type,
+          contentJson: questions.contentJson,
         })
         .from(examQuestions)
+        .innerJoin(questions, eq(examQuestions.questionId, questions.id))
         .where(inArray(examQuestions.examSectionId, sectionIds))
         .orderBy(asc(examQuestions.displayOrder));
+
+      // Fetch options for all questions in one query
+      const questionIds = sectionQuestions.map((q) => q.questionId);
+      if (questionIds.length > 0) {
+        const allOptions = await db
+          .select({
+            questionId: questionOptions.questionId,
+            optionText: questionOptions.optionText,
+            isCorrect: questionOptions.isCorrect,
+            displayOrder: questionOptions.displayOrder,
+          })
+          .from(questionOptions)
+          .where(
+            sql`${questionOptions.questionId} = ANY(${sql.raw(`ARRAY['${questionIds.join("','")}']::uuid[]`)})`,
+          )
+          .orderBy(asc(questionOptions.displayOrder));
+
+        const optionsMap = new Map<string, typeof allOptions>();
+        for (const opt of allOptions) {
+          const arr = optionsMap.get(opt.questionId) ?? [];
+          arr.push(opt);
+          optionsMap.set(opt.questionId, arr);
+        }
+        sectionQuestions = sectionQuestions.map((q) => ({
+          ...q,
+          options: optionsMap.get(q.questionId) ?? [],
+        }));
+      }
     }
 
     const sectionsWithQuestions = sections.map((s) => ({
@@ -239,6 +394,68 @@ const examRoutes: FastifyPluginAsync = async (app) => {
 
     if (!updated) return reply.code(404).send({ error: "Exam not found" });
     return reply.send({ message: "Exam deactivated" });
+  });
+
+  /* ----- DELETE /exams/:id/permanent — permanently delete exam ----- */
+  app.delete("/:id/permanent", async (request, reply) => {
+    const { id } = request.params as { id: string };
+
+    // Get all exam batch IDs for this exam
+    const batchIds = await db
+      .select({ id: examBatches.id, status: examBatches.status })
+      .from(examBatches)
+      .where(eq(examBatches.examId, id));
+    const batchIdList = batchIds.map((b) => b.id);
+
+    // Prevent deletion if any batch is active or published
+    const hasRunning = batchIds.some(
+      (b) => b.status === "active" || b.status === "published",
+    );
+    if (hasRunning) {
+      return reply.code(409).send({
+        error:
+          "Cannot delete an exam with an ongoing batch. Stop the exam first.",
+      });
+    }
+
+    // Get all exam section IDs for this exam
+    const sectionIds = await db
+      .select({ id: examSections.id })
+      .from(examSections)
+      .where(eq(examSections.examId, id));
+    const sectionIdList = sectionIds.map((s) => s.id);
+
+    // Delete in correct FK order
+    if (sectionIdList.length > 0) {
+      await db
+        .delete(examQuestions)
+        .where(inArray(examQuestions.examSectionId, sectionIdList));
+    }
+    await db.delete(examSections).where(eq(examSections.examId, id));
+
+    if (batchIdList.length > 0) {
+      await db
+        .delete(analyticsSnapshots)
+        .where(inArray(analyticsSnapshots.examBatchId, batchIdList));
+      await db
+        .delete(attempts)
+        .where(inArray(attempts.examBatchId, batchIdList));
+      await db
+        .delete(proctoringConfigs)
+        .where(inArray(proctoringConfigs.examBatchId, batchIdList));
+      await db
+        .delete(examBatchCandidates)
+        .where(inArray(examBatchCandidates.examBatchId, batchIdList));
+      await db.delete(examBatches).where(inArray(examBatches.id, batchIdList));
+    }
+
+    const [deleted] = await db
+      .delete(exams)
+      .where(eq(exams.id, id))
+      .returning({ id: exams.id });
+
+    if (!deleted) return reply.code(404).send({ error: "Exam not found" });
+    return reply.send({ message: "Exam permanently deleted" });
   });
 
   /* ----- POST /exams/:id/sections — add section ----- */
@@ -370,8 +587,6 @@ const examRoutes: FastifyPluginAsync = async (app) => {
       examSectionId: sectionId,
       questionId,
       displayOrder: nextOrder++,
-      marks: String(parsed.data.marks),
-      negativeMarks: String(parsed.data.negativeMarks),
       isOptional: parsed.data.isOptional,
     }));
 
@@ -400,10 +615,6 @@ const examRoutes: FastifyPluginAsync = async (app) => {
         });
 
       const updateFields: Record<string, unknown> = {};
-      if (parsed.data.marks !== undefined)
-        updateFields.marks = String(parsed.data.marks);
-      if (parsed.data.negativeMarks !== undefined)
-        updateFields.negativeMarks = String(parsed.data.negativeMarks);
       if (parsed.data.isOptional !== undefined)
         updateFields.isOptional = parsed.data.isOptional;
       if (parsed.data.displayOrder !== undefined)
@@ -451,6 +662,331 @@ const examRoutes: FastifyPluginAsync = async (app) => {
       return reply.send({ message: "Question removed from section" });
     },
   );
+
+  /* ----- POST /exams/:id/import-questions — multi-tab Excel, each tab = section ----- */
+  app.post("/:id/import-questions", async (request, reply) => {
+    const { id } = request.params as { id: string };
+
+    // Verify exam exists
+    const [exam] = await db
+      .select({ id: exams.id, subjectId: exams.subjectId })
+      .from(exams)
+      .where(eq(exams.id, id))
+      .limit(1);
+    if (!exam) return reply.code(404).send({ error: "Exam not found" });
+
+    const file = await request.file();
+    if (!file) return reply.code(400).send({ error: "No file uploaded" });
+
+    const fields = file.fields as Record<string, unknown>;
+    const subjectId = (fields.subjectId as { value?: string })?.value;
+    if (!subjectId)
+      return reply.code(400).send({ error: "subjectId is required" });
+
+    const filename = file.filename.toLowerCase();
+    if (!filename.endsWith(".xlsx") && !filename.endsWith(".xls"))
+      return reply
+        .code(400)
+        .send({ error: "File must be an Excel (.xlsx) file" });
+
+    const buf = await file.toBuffer();
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buf as unknown as ArrayBuffer);
+
+    if (workbook.worksheets.length === 0)
+      return reply.code(400).send({ error: "Excel file has no worksheets" });
+
+    // Get existing sections for this exam
+    const existingSections = await db
+      .select()
+      .from(examSections)
+      .where(eq(examSections.examId, id))
+      .orderBy(examSections.sectionOrder);
+
+    let maxSectionOrder = existingSections.reduce(
+      (max, s) => Math.max(max, s.sectionOrder),
+      0,
+    );
+
+    const results: {
+      sectionName: string;
+      sectionId: string;
+      imported: number;
+      failed: number;
+      errors: { row: number; error: string }[];
+    }[] = [];
+
+    // Process each worksheet tab as a section
+    for (const worksheet of workbook.worksheets) {
+      const sectionName = worksheet.name.trim();
+      if (!sectionName) continue;
+
+      // Parse headers from row 1
+      const headers: string[] = [];
+      worksheet.getRow(1).eachCell((cell, colNumber) => {
+        headers[colNumber - 1] = String(cell.value ?? "")
+          .toLowerCase()
+          .trim();
+      });
+
+      const getCol = (row: ExcelJS.Row, name: string): string => {
+        const idx = headers.indexOf(name);
+        if (idx < 0) return "";
+        const cell = row.getCell(idx + 1);
+        return String(cell.value ?? "").trim();
+      };
+
+      // Find or create section
+      let section = existingSections.find(
+        (s) => s.name.toLowerCase() === sectionName.toLowerCase(),
+      );
+
+      if (!section) {
+        maxSectionOrder++;
+        const [newSection] = await db
+          .insert(examSections)
+          .values({
+            examId: id,
+            name: sectionName,
+            sectionOrder: maxSectionOrder,
+            totalMarks: "0",
+            questionCount: 0,
+            shuffleQuestions: false,
+            shuffleOptions: false,
+          } as typeof examSections.$inferInsert)
+          .returning();
+        section = newSection;
+        existingSections.push(section);
+      }
+
+      // Get max display order for existing questions in this section
+      const [maxRow] = await db
+        .select({
+          maxOrder: sql<number>`COALESCE(MAX(${examQuestions.displayOrder}), 0)`,
+        })
+        .from(examQuestions)
+        .where(eq(examQuestions.examSectionId, section.id));
+      let nextDisplayOrder = (maxRow?.maxOrder ?? 0) + 1;
+
+      let imported = 0;
+      let failed = 0;
+      const errors: { row: number; error: string }[] = [];
+
+      const questionInserts: (typeof questions.$inferInsert)[] = [];
+      const optionInserts: {
+        questionId: string;
+        optionText: string;
+        isCorrect: boolean;
+        displayOrder: number;
+      }[] = [];
+      const examQuestionInserts: {
+        examSectionId: string;
+        questionId: string;
+        displayOrder: number;
+        isOptional: boolean;
+      }[] = [];
+
+      for (let rowIdx = 2; rowIdx <= worksheet.rowCount; rowIdx++) {
+        const row = worksheet.getRow(rowIdx);
+        const questionText =
+          getCol(row, "question text") || getCol(row, "question");
+        if (!questionText) {
+          if (rowIdx > 2 || worksheet.rowCount > 2) {
+            failed++;
+            errors.push({ row: rowIdx, error: "Empty question text" });
+          }
+          continue;
+        }
+
+        try {
+          const type = getCol(row, "type") || "mcq_single";
+          const solutionText = getCol(row, "solution");
+          const explanation = getCol(row, "explanation");
+
+          // Parse options (Option 1-6)
+          const opts: {
+            optionText: string;
+            isCorrect: boolean;
+            displayOrder: number;
+          }[] = [];
+          for (let i = 1; i <= 6; i++) {
+            const optText = getCol(row, `option ${i}`);
+            if (!optText) continue;
+            // Parse correct options (comma-separated indices or "all")
+            const correctStr = getCol(row, "correct options");
+            let isCorrect = false;
+            if (correctStr.toLowerCase() === "all") {
+              isCorrect = true;
+            } else {
+              const correctIndices = correctStr
+                .split(",")
+                .map((s) => parseInt(s.trim()))
+                .filter((n) => !isNaN(n));
+              isCorrect = correctIndices.includes(i);
+            }
+            opts.push({
+              optionText: optText,
+              isCorrect,
+              displayOrder: i,
+            });
+          }
+
+          if (opts.length === 0) {
+            failed++;
+            errors.push({ row: rowIdx, error: "No options provided" });
+            continue;
+          }
+
+          // Check at least one correct option
+          if (!opts.some((o) => o.isCorrect)) {
+            failed++;
+            errors.push({
+              row: rowIdx,
+              error: "No correct option marked",
+            });
+            continue;
+          }
+
+          const contentJson: Record<string, unknown> = { text: questionText };
+          if (getCol(row, "question image"))
+            contentJson.imageUrl = getCol(row, "question image");
+
+          const solutionJson: Record<string, unknown> | null = {};
+          if (solutionText) solutionJson!.text = solutionText;
+          if (explanation) solutionJson!.explanation = explanation;
+          const hasSolution = solutionText || explanation;
+
+          questionInserts.push({
+            subjectId,
+            type: type as "mcq_single" | "mcq_multiple" | "true_false",
+            contentJson,
+            solutionJson: hasSolution ? solutionJson : null,
+            createdBy: request.user.sub,
+          });
+
+          // Store options + exam question mapping temporarily with placeholder index
+          const placeholderIdx = questionInserts.length - 1;
+          for (const opt of opts) {
+            optionInserts.push({
+              questionId: `__placeholder_${placeholderIdx}`,
+              ...opt,
+            });
+          }
+          examQuestionInserts.push({
+            examSectionId: section.id,
+            questionId: `__placeholder_${placeholderIdx}`,
+            displayOrder: nextDisplayOrder++,
+            isOptional: false,
+          });
+        } catch (err) {
+          failed++;
+          errors.push({
+            row: rowIdx,
+            error: (err as Error).message,
+          });
+        }
+      }
+
+      // Batch insert questions, then resolve placeholders
+      if (questionInserts.length > 0) {
+        try {
+          const insertedQuestions = await db
+            .insert(questions)
+            .values(questionInserts)
+            .returning({ id: questions.id });
+
+          // Replace placeholders with actual IDs
+          for (let i = 0; i < insertedQuestions.length; i++) {
+            const qId = insertedQuestions[i].id;
+            for (const opt of optionInserts) {
+              if (opt.questionId === `__placeholder_${i}`) {
+                opt.questionId = qId;
+              }
+            }
+            for (const eq of examQuestionInserts) {
+              if (eq.questionId === `__placeholder_${i}`) {
+                eq.questionId = qId;
+              }
+            }
+          }
+
+          // Insert options
+          if (optionInserts.length > 0) {
+            await db.insert(questionOptions).values(
+              optionInserts.map((o) => ({
+                questionId: o.questionId,
+                optionText: o.optionText,
+                isCorrect: o.isCorrect,
+                displayOrder: o.displayOrder,
+              })),
+            );
+          }
+
+          // Insert exam questions
+          if (examQuestionInserts.length > 0) {
+            await db.insert(examQuestions).values(examQuestionInserts);
+          }
+
+          // Insert question versions
+          const versionInserts = insertedQuestions.map((q) => ({
+            questionId: q.id,
+            versionNumber: 1,
+            contentJson: questionInserts[insertedQuestions.indexOf(q)]
+              .contentJson as Record<string, unknown>,
+            changedBy: request.user.sub,
+            changeReason: "Bulk import (Excel section-wise)",
+          }));
+          if (versionInserts.length > 0) {
+            await db.insert(questionVersions).values(versionInserts);
+          }
+
+          imported = insertedQuestions.length;
+        } catch (err) {
+          failed += questionInserts.length;
+          errors.push({
+            row: 0,
+            error: `Batch insert failed: ${(err as Error).message}`,
+          });
+        }
+      }
+
+      // Update section question count
+      if (imported > 0) {
+        const totalQuestionsInSection = await db
+          .select({
+            count: sql<number>`COUNT(*)::int`,
+          })
+          .from(examQuestions)
+          .where(eq(examQuestions.examSectionId, section.id));
+
+        await db
+          .update(examSections)
+          .set({
+            questionCount: totalQuestionsInSection[0]?.count ?? 0,
+            updatedAt: new Date(),
+          })
+          .where(eq(examSections.id, section.id));
+      }
+
+      results.push({
+        sectionName,
+        sectionId: section.id,
+        imported,
+        failed,
+        errors: errors.length > 0 ? errors.slice(0, 10) : [],
+      });
+    }
+
+    const totalImported = results.reduce((sum, r) => sum + r.imported, 0);
+    const totalFailed = results.reduce((sum, r) => sum + r.failed, 0);
+
+    return reply.code(201).send({
+      success: true,
+      sections: results,
+      totalImported,
+      totalFailed,
+    });
+  });
 };
 
 export default examRoutes;
