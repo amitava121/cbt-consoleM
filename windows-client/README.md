@@ -1,14 +1,19 @@
 # CBT Platform — Windows Exam Client
 
+> **⚠️ DEPRECATED — This module is no longer actively maintained.**
+> The platform is switching to **Safe Exam Browser (SEB)** for exam delivery.
+> Files are kept for reference. CI builds are disabled (`if: false` in workflow).
+> To re-enable, remove the `if: false` line in `.github/workflows/windows-client-tests.yml`.
+
 .NET 8 WPF secure kiosk exam client with Native AOT `ExamLauncher` watchdog.
 
 ## Projects
 
-| Project | Description |
-|---------|-------------|
-| **ExamClient** | WPF .NET 8 kiosk application (MVVM, CommunityToolkit.Mvvm, SQLCipher offline cache) |
-| **ExamLauncher** | Native AOT watchdog — starts, monitors, and restarts ExamClient on crash |
-| **Shared** | Class library shared between ExamClient and ExamLauncher (models, crypto, logging, config) |
+| Project          | Description                                                                                |
+| ---------------- | ------------------------------------------------------------------------------------------ |
+| **ExamClient**   | WPF .NET 8 kiosk application (MVVM, CommunityToolkit.Mvvm, SQLCipher offline cache)        |
+| **ExamLauncher** | Native AOT watchdog — starts, monitors, and restarts ExamClient on crash                   |
+| **Shared**       | Class library shared between ExamClient and ExamLauncher (models, crypto, logging, config) |
 
 ## Build
 

@@ -1,4 +1,4 @@
-name: Windows Client Tests
+name: Windows Client Tests (Disabled — switching to SEB)
 
 on:
   push:
@@ -8,9 +8,11 @@ on:
   pull_request:
     paths:
       - "windows-client/**"
+  workflow_dispatch: {}
 
 jobs:
   test:
+    if: false # Disabled: switching from Windows client to SEB. Remove this line to re-enable.
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
