@@ -615,47 +615,24 @@ function SebSettingsTab() {
     enabled: false,
     requireBek: true,
     startUrl: "",
-    quitUrl: "",
-    quitPassword: "",
-    allowQuit: true,
-    allowReload: false,
-    showTime: true,
-    showKeyboardLayout: false,
-    allowSpellCheck: false,
-    allowZoom: true,
-    blockScreenCapture: true,
-    blockScreenSharing: true,
-    allowDeveloperConsole: false,
-    muteAudio: false,
-    allowWindowResize: false,
-    blockedProcesses: [
-      "TeamViewer",
-      "AnyDesk",
-      "Chrome Remote Desktop",
-      "Skype",
-      "Zoom",
-      "Discord",
-      "Snipping Tool",
-      "OBS Studio",
-    ],
-    urlFilterRules: [
-      { action: "allow", url: "localhost", description: "Allow backend API" },
-      { action: "allow", url: "127.0.0.1", description: "Allow local backend" },
-    ],
   });
   const [blockedProcessesText, setBlockedProcessesText] = useState("");
+  const [permittedProcessesText, setPermittedProcessesText] = useState("");
+  const [openSection, setOpenSection] = useState<string>("general");
 
   const sebQuery = useQuery({
     queryKey: ["seb-settings"],
     queryFn: sebService.getSettings,
   });
 
-  // Sync form when data loads
   useEffect(() => {
     if (sebQuery.data) {
       setForm(sebQuery.data);
       setBlockedProcessesText(
         (sebQuery.data.blockedProcesses ?? []).join("\n"),
+      );
+      setPermittedProcessesText(
+        (sebQuery.data.permittedProcesses ?? []).join("\n"),
       );
     }
   }, [sebQuery.data]);
@@ -670,15 +647,31 @@ function SebSettingsTab() {
   });
 
   const handleSave = () => {
-    const processes = blockedProcessesText
+    const blocked = blockedProcessesText
       .split("\n")
       .map((p) => p.trim())
       .filter(Boolean);
-    saveMutation.mutate({ ...form, blockedProcesses: processes });
+    const permitted = permittedProcessesText
+      .split("\n")
+      .map((p) => p.trim())
+      .filter(Boolean);
+    saveMutation.mutate({
+      ...form,
+      blockedProcesses: blocked,
+      permittedProcesses: permitted,
+    });
   };
 
   const toggle = (key: keyof SebSettings) => {
     setForm((prev) => ({ ...prev, [key]: !prev[key] as never }));
+  };
+
+  const setNum = (key: keyof SebSettings, value: number) => {
+    setForm((prev) => ({ ...prev, [key]: value as never }));
+  };
+
+  const setStr = (key: keyof SebSettings, value: string) => {
+    setForm((prev) => ({ ...prev, [key]: value as never }));
   };
 
   if (sebQuery.isLoading) {
@@ -689,77 +682,105 @@ function SebSettingsTab() {
     );
   }
 
-  const toggles: {
-    key: keyof SebSettings;
+  // Helper: Toggle switch
+  const Toggle = ({
+    k,
+    label,
+    desc,
+  }: {
+    k: keyof SebSettings;
     label: string;
-    description: string;
-  }[] = [
-    {
-      key: "enabled",
-      label: "Enable SEB",
-      description: "Require Safe Exam Browser for all exams",
-    },
-    {
-      key: "requireBek",
-      label: "Require Browser Exam Key",
-      description: "Reject SEB requests without valid BEK header",
-    },
-    {
-      key: "allowQuit",
-      label: "Allow Quit",
-      description: "Allow students to quit SEB during exam",
-    },
-    {
-      key: "allowReload",
-      label: "Allow Reload",
-      description: "Allow page reload inside SEB",
-    },
-    {
-      key: "showTime",
-      label: "Show Time",
-      description: "Display clock in SEB",
-    },
-    {
-      key: "showKeyboardLayout",
-      label: "Show Keyboard Layout",
-      description: "Show keyboard layout switcher",
-    },
-    {
-      key: "allowSpellCheck",
-      label: "Allow Spell Check",
-      description: "Enable spell checking in SEB",
-    },
-    {
-      key: "allowZoom",
-      label: "Allow Zoom",
-      description: "Allow zoom in/out in SEB",
-    },
-    {
-      key: "allowWindowResize",
-      label: "Allow Window Resize",
-      description: "Allow resizing the SEB window",
-    },
-    {
-      key: "blockScreenCapture",
-      label: "Block Screen Capture",
-      description: "Prevent screen capture tools",
-    },
-    {
-      key: "blockScreenSharing",
-      label: "Block Screen Sharing",
-      description: "Prevent screen sharing apps",
-    },
-    {
-      key: "allowDeveloperConsole",
-      label: "Allow Developer Console",
-      description: "Allow dev tools (not recommended)",
-    },
-    {
-      key: "muteAudio",
-      label: "Mute Audio",
-      description: "Mute all audio in SEB",
-    },
-  ];
+    desc: string;
+  }) => (
+    <div className="flex items-start justify-between rounded-lg border p-3">
+      <div className="mr-3">
+        <p className="text-sm font-medium">{label}</p>
+        <p className="text-xs text-muted-foreground">{desc}</p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={form[k] as boolean}
+        onClick={() => toggle(k)}
+        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${form[k] ? "bg-primary" : "bg-input"}`}
+      >
+        <span
+          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-background shadow-lg ring-0 transition-transform ${form[k] ? "translate-x-5" : "translate-x-0"}`}
+        />
+      </button>
+    </div>
+  );
+
+  // Helper: Collapsible section
+  const Section = ({
+    id,
+    title,
+    children,
+  }: {
+    id: string;
+    title: string;
+    children: React.ReactNode;
+  }) => (
+    <div className="rounded-lg border">
+      <button
+        type="button"
+        onClick={() => setOpenSection(openSection === id ? "" : id)}
+        className="flex w-full items-center justify-between p-4 text-left"
+      >
+        <h3 className="text-base font-semibold">{title}</h3>
+        <span className="text-muted-foreground">
+          {openSection === id ? "−" : "+"}
+        </span>
+      </button>
+      {openSection === id && (
+        <div className="space-y-4 p-4 pt-0">{children}</div>
+      )}
+    </div>
+  );
+
+  // Helper: Number input
+  const NumInput = ({
+    k,
+    label,
+    placeholder,
+  }: {
+    k: keyof SebSettings;
+    label: string;
+    placeholder?: string;
+  }) => (
+    <div className="space-y-1">
+      <Label className="text-xs">{label}</Label>
+      <Input
+        type="number"
+        value={(form[k] as number) ?? 0}
+        onChange={(e) => setNum(k, parseInt(e.target.value) || 0)}
+        placeholder={placeholder}
+      />
+    </div>
+  );
+
+  // Helper: Text input
+  const TextInput = ({
+    k,
+    label,
+    placeholder,
+    type,
+  }: {
+    k: keyof SebSettings;
+    label: string;
+    placeholder?: string;
+    type?: string;
+  }) => (
+    <div className="space-y-1">
+      <Label className="text-xs">{label}</Label>
+      <Input
+        type={type ?? "text"}
+        value={(form[k] as string) ?? ""}
+        onChange={(e) => setStr(k, e.target.value)}
+        placeholder={placeholder}
+      />
+    </div>
+  );
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -773,81 +794,542 @@ function SebSettingsTab() {
         <p className="text-sm text-muted-foreground">
           These settings apply globally to all exam batches. When SEB is
           enabled, candidates must launch exams through Safe Exam Browser.
+          Settings are based on the official SEB configuration key
+          specification.
         </p>
       </div>
 
-      {/* Toggle switches */}
+      {/* Quick toggles - always visible */}
       <div className="grid gap-3 sm:grid-cols-2">
-        {toggles.map((t) => (
-          <div
-            key={t.key}
-            className="flex items-start justify-between rounded-lg border p-3"
-          >
-            <div className="mr-3">
-              <p className="text-sm font-medium">{t.label}</p>
-              <p className="text-xs text-muted-foreground">{t.description}</p>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={form[t.key] as boolean}
-              onClick={() => toggle(t.key)}
-              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
-                form[t.key] ? "bg-primary" : "bg-input"
-              }`}
-            >
-              <span
-                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-background shadow-lg ring-0 transition-transform ${
-                  form[t.key] ? "translate-x-5" : "translate-x-0"
-                }`}
-              />
-            </button>
-          </div>
-        ))}
+        <Toggle
+          k="enabled"
+          label="Enable SEB"
+          desc="Require Safe Exam Browser for all exams"
+        />
+        <Toggle
+          k="requireBek"
+          label="Require Browser Exam Key"
+          desc="Reject requests without valid BEK header"
+        />
       </div>
 
-      {/* URL fields */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-2">
-          <Label htmlFor="seb-start-url">Start URL (optional)</Label>
-          <Input
-            id="seb-start-url"
-            value={form.startUrl}
-            onChange={(e) => setForm({ ...form, startUrl: e.target.value })}
+      {/* General */}
+      <Section id="general" title="General">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <TextInput
+            k="startUrl"
+            label="Start URL (optional)"
             placeholder="https://exam.example.com/exam"
           />
-          <p className="text-xs text-muted-foreground">
-            Leave empty to auto-detect from request
-          </p>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="seb-quit-url">Quit URL (optional)</Label>
-          <Input
-            id="seb-quit-url"
-            value={form.quitUrl}
-            onChange={(e) => setForm({ ...form, quitUrl: e.target.value })}
+          <TextInput
+            k="sebServerUrl"
+            label="SEB Server URL (optional)"
+            placeholder="https://seb-server.example.com"
+          />
+          <TextInput
+            k="quitUrl"
+            label="Quit URL (optional)"
             placeholder="https://exam.example.com/quit"
           />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="seb-quit-password">Quit Password (optional)</Label>
-          <Input
-            id="seb-quit-password"
+          <TextInput
+            k="quitPassword"
+            label="Quit Password (optional)"
             type="password"
-            value={form.quitPassword ?? ""}
-            onChange={(e) => setForm({ ...form, quitPassword: e.target.value })}
-            placeholder="Password required to quit SEB"
+            placeholder="Password to quit SEB"
+          />
+          <NumInput
+            k="sebMode"
+            label="SEB Mode (0=kiosk, 1=browser)"
+            placeholder="0"
           />
         </div>
-      </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Toggle
+            k="allowQuit"
+            label="Allow Quit"
+            desc="Allow students to quit SEB"
+          />
+          <Toggle
+            k="quitUrlConfirm"
+            label="Confirm Quit URL"
+            desc="Show confirmation dialog before quitting"
+          />
+          <Toggle
+            k="ignoreExitKeys"
+            label="Ignore Exit Keys"
+            desc="Ignore standard SEB exit key combinations"
+          />
+          <Toggle
+            k="quitURLRestart"
+            label="Quit URL Restart"
+            desc="Restart exam when quitting to quitURL"
+          />
+        </div>
+      </Section>
 
-      {/* Blocked processes */}
-      <div className="space-y-2">
-        <Label htmlFor="seb-blocked-processes">
-          Blocked Processes (one per line)
-        </Label>
+      {/* User Interface */}
+      <Section id="ui" title="User Interface">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Toggle
+            k="showTaskBar"
+            label="Show Task Bar"
+            desc="Display SEB task bar"
+          />
+          <Toggle k="showTime" label="Show Time" desc="Display clock in SEB" />
+          <Toggle
+            k="showReloadButton"
+            label="Show Reload Button"
+            desc="Show page reload button"
+          />
+          <Toggle
+            k="showInputLanguage"
+            label="Show Input Language"
+            desc="Show keyboard layout switcher"
+          />
+          <Toggle
+            k="showSideMenu"
+            label="Show Side Menu"
+            desc="Show SEB side menu"
+          />
+          <Toggle
+            k="showMenuBar"
+            label="Show Menu Bar"
+            desc="Show menu bar in SEB"
+          />
+          <Toggle
+            k="enableBrowserWindowToolbar"
+            label="Browser Toolbar"
+            desc="Enable browser window toolbar"
+          />
+          <Toggle
+            k="hideBrowserWindowToolbar"
+            label="Hide Toolbar"
+            desc="Hide browser window toolbar"
+          />
+          <Toggle
+            k="browserWindowAllowAddressBar"
+            label="Address Bar"
+            desc="Allow address bar in browser window"
+          />
+          <Toggle
+            k="touchOptimized"
+            label="Touch Optimized"
+            desc="Optimize UI for touch devices"
+          />
+          <Toggle
+            k="enableZoomText"
+            label="Enable Zoom Text"
+            desc="Allow text zoom"
+          />
+          <Toggle
+            k="enableZoomPage"
+            label="Enable Zoom Page"
+            desc="Allow page zoom"
+          />
+          <Toggle
+            k="allowDictionaryLookup"
+            label="Dictionary Lookup"
+            desc="Allow dictionary lookups"
+          />
+          <Toggle
+            k="enableTouchExit"
+            label="Touch Exit"
+            desc="Enable touch-based exit"
+          />
+          <Toggle
+            k="allowDeveloperConsole"
+            label="Developer Console"
+            desc="Allow dev tools (not recommended)"
+          />
+          <Toggle
+            k="allowSpellCheck"
+            label="Spell Check"
+            desc="Enable spell checking"
+          />
+          <Toggle
+            k="allowSpellCheckDictionary"
+            label="Spell Check Dictionary"
+            desc="Allow spell check dictionaries"
+          />
+          <Toggle
+            k="audioMute"
+            label="Mute Audio"
+            desc="Mute all audio in SEB"
+          />
+          <Toggle
+            k="audioControlEnabled"
+            label="Audio Control"
+            desc="Enable audio control in task bar"
+          />
+          <Toggle
+            k="audioSetVolumeLevel"
+            label="Set Volume Level"
+            desc="Force specific volume level"
+          />
+          <Toggle
+            k="browserScreenKeyboard"
+            label="Screen Keyboard"
+            desc="Show on-screen keyboard"
+          />
+          <Toggle
+            k="showQrVerifyButton"
+            label="QR Verify Button"
+            desc="Show QR verification button"
+          />
+          <Toggle
+            k="allowFind"
+            label="Allow Find"
+            desc="Allow page search functionality"
+          />
+          <Toggle
+            k="allowPrint"
+            label="Allow Print"
+            desc="Allow printing from SEB"
+          />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <NumInput
+            k="zoomMode"
+            label="Zoom Mode (0=config, 1=always)"
+            placeholder="0"
+          />
+          <NumInput
+            k="oskBehavior"
+            label="OSK Behavior (0=none, 1=allow, 2=force)"
+            placeholder="0"
+          />
+          <NumInput
+            k="audioVolumeLevel"
+            label="Audio Volume Level (0-100)"
+            placeholder="25"
+          />
+          <NumInput
+            k="batteryChargeThresholdCritical"
+            label="Battery Critical Threshold (%)"
+            placeholder="0"
+          />
+          <NumInput
+            k="batteryChargeThresholdLow"
+            label="Battery Low Threshold (%)"
+            placeholder="0"
+          />
+        </div>
+        <TextInput
+          k="browserWindowTitleSuffix"
+          label="Browser Window Title Suffix"
+          placeholder=""
+        />
+      </Section>
+
+      {/* Browser */}
+      <Section id="browser" title="Browser">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Toggle
+            k="enableSebBrowser"
+            label="Enable SEB Browser"
+            desc="Use SEB's internal browser"
+          />
+          <Toggle
+            k="browserWindowAllowReload"
+            label="Allow Reload (main window)"
+            desc="Allow reload in main browser window"
+          />
+          <Toggle
+            k="newBrowserWindowAllowReload"
+            label="Allow Reload (new windows)"
+            desc="Allow reload in new browser windows"
+          />
+          <Toggle
+            k="showReloadWarning"
+            label="Show Reload Warning"
+            desc="Warn before reloading"
+          />
+          <Toggle
+            k="newBrowserWindowShowReloadWarning"
+            label="Reload Warning (new windows)"
+            desc="Warn before reloading new windows"
+          />
+          <Toggle
+            k="enablePlugIns"
+            label="Enable Plug-ins"
+            desc="Enable browser plug-ins"
+          />
+          <Toggle
+            k="enableJava"
+            label="Enable Java"
+            desc="Enable Java applets"
+          />
+          <Toggle
+            k="enableJavaScript"
+            label="Enable JavaScript"
+            desc="Enable JavaScript execution"
+          />
+          <Toggle
+            k="blockPopUpWindows"
+            label="Block Pop-ups"
+            desc="Block pop-up windows"
+          />
+          <Toggle
+            k="allowVideoCapture"
+            label="Allow Video Capture"
+            desc="Allow camera access"
+          />
+          <Toggle
+            k="allowAudioCapture"
+            label="Allow Audio Capture"
+            desc="Allow microphone access"
+          />
+          <Toggle
+            k="allowBrowsingBackForward"
+            label="Back/Forward Navigation"
+            desc="Allow back/forward browsing"
+          />
+          <Toggle
+            k="removeBrowserProfile"
+            label="Remove Browser Profile"
+            desc="Clear browser profile on start"
+          />
+          <Toggle
+            k="removeLocalStorage"
+            label="Remove Local Storage"
+            desc="Clear local storage on start"
+          />
+          <Toggle
+            k="allowPDFReaderToolbar"
+            label="PDF Reader Toolbar"
+            desc="Allow PDF reader toolbar"
+          />
+          <Toggle
+            k="allowPDFPlugIn"
+            label="PDF Plug-in"
+            desc="Use PDF browser plug-in"
+          />
+          <Toggle
+            k="newBrowserWindowByLinkBlockForeign"
+            label="Block Foreign (link)"
+            desc="Block foreign content via links"
+          />
+          <Toggle
+            k="newBrowserWindowByScriptBlockForeign"
+            label="Block Foreign (script)"
+            desc="Block foreign content via scripts"
+          />
+          <Toggle
+            k="newBrowserWindowShowURL"
+            label="Show URL (new windows)"
+            desc="Show URL in new browser windows"
+          />
+          <Toggle
+            k="browserWindowShowURL"
+            label="Show URL (main window)"
+            desc="Show URL in main browser window"
+          />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <NumInput
+            k="newBrowserWindowByLinkPolicy"
+            label="Link Window Policy (0=open, 1=block, 2=same)"
+            placeholder="2"
+          />
+          <NumInput
+            k="newBrowserWindowByScriptPolicy"
+            label="Script Window Policy (0=open, 1=block, 2=same)"
+            placeholder="2"
+          />
+        </div>
+        <TextInput
+          k="browserUserAgent"
+          label="Custom User Agent (optional)"
+          placeholder="Leave empty for default"
+        />
+      </Section>
+
+      {/* Downloads / Uploads */}
+      <Section id="downloads" title="Downloads & Uploads">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Toggle
+            k="allowDownloads"
+            label="Allow Downloads"
+            desc="Allow file downloads"
+          />
+          <Toggle
+            k="allowUploads"
+            label="Allow Uploads"
+            desc="Allow file uploads"
+          />
+          <Toggle
+            k="allowCustomDownUploadLocation"
+            label="Custom Download Location"
+            desc="Allow choosing download location"
+          />
+          <Toggle
+            k="openDownloads"
+            label="Open Downloads"
+            desc="Automatically open downloaded files"
+          />
+          <Toggle
+            k="downloadPDFFiles"
+            label="Download PDF Files"
+            desc="Download PDFs instead of viewing"
+          />
+          <Toggle
+            k="downloadAndOpenSebConfig"
+            label="Download & Open .seb Config"
+            desc="Allow downloading SEB config files"
+          />
+          <Toggle
+            k="backgroundOpenSebConfig"
+            label="Background Open SEB Config"
+            desc="Open SEB config in background"
+          />
+          <Toggle
+            k="useTemporaryDownUploadDirectory"
+            label="Temporary Directory"
+            desc="Use temporary directory for downloads"
+          />
+          <Toggle
+            k="browserShowFileSystemElementPath"
+            label="Show File Path"
+            desc="Show full file system paths"
+          />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <TextInput
+            k="downloadDirectoryWin"
+            label="Download Directory (Windows)"
+            placeholder=""
+          />
+          <TextInput
+            k="downloadDirectoryMac"
+            label="Download Directory (macOS)"
+            placeholder=""
+          />
+          <NumInput
+            k="chooseFileToUploadPolicy"
+            label="File Upload Policy (0=allow, 1=block)"
+            placeholder="0"
+          />
+        </div>
+      </Section>
+
+      {/* Exam */}
+      <Section id="exam" title="Exam Settings">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Toggle
+            k="sendBrowserExamKey"
+            label="Send Browser Exam Key"
+            desc="Send BEK in HTTP header"
+          />
+          <Toggle
+            k="browserURLSalt"
+            label="Browser URL Salt"
+            desc="Use URL salt for BEK"
+          />
+          <Toggle
+            k="examSessionClearCookiesOnStart"
+            label="Clear Cookies on Start"
+            desc="Clear cookies when exam starts"
+          />
+          <Toggle
+            k="examSessionClearCookiesOnEnd"
+            label="Clear Cookies on End"
+            desc="Clear cookies when exam ends"
+          />
+          <Toggle
+            k="examSessionReconfigureAllow"
+            label="Allow Reconfiguration"
+            desc="Allow SEB reconfiguration during exam"
+          />
+          <Toggle
+            k="restartExamUseStartURL"
+            label="Restart Uses Start URL"
+            desc="Restart exam uses start URL"
+          />
+          <Toggle
+            k="restartExamPasswordProtected"
+            label="Restart Password Protected"
+            desc="Require password to restart exam"
+          />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <TextInput
+            k="restartExamText"
+            label="Restart Exam Text"
+            placeholder=""
+          />
+          <TextInput
+            k="restartExamURL"
+            label="Restart Exam URL"
+            placeholder=""
+          />
+          <TextInput
+            k="examSessionReconfigureConfigURL"
+            label="Reconfiguration Config URL"
+            placeholder=""
+          />
+          <TextInput
+            k="startURLAppendQueryParameter"
+            label="Start URL Query Parameter"
+            placeholder=""
+          />
+        </div>
+      </Section>
+
+      {/* Applications */}
+      <Section id="apps" title="Applications & Security">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Toggle
+            k="monitorProcesses"
+            label="Monitor Processes"
+            desc="Monitor running processes"
+          />
+          <Toggle
+            k="allowSwitchToApplications"
+            label="Switch to Applications"
+            desc="Allow switching to other apps"
+          />
+          <Toggle
+            k="allowFlashFullscreen"
+            label="Allow Flash Fullscreen"
+            desc="Allow Flash fullscreen mode"
+          />
+          <Toggle
+            k="allowWindowResize"
+            label="Allow Window Resize"
+            desc="Allow resizing SEB window"
+          />
+          <Toggle
+            k="blockScreenCapture"
+            label="Block Screen Capture"
+            desc="Prevent screen capture tools"
+          />
+          <Toggle
+            k="blockScreenSharing"
+            label="Block Screen Sharing"
+            desc="Prevent screen sharing apps"
+          />
+        </div>
+      </Section>
+
+      {/* Network */}
+      <Section id="network" title="Network & URL Filtering">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Toggle
+            k="enableURLFilter"
+            label="Enable URL Filter"
+            desc="Filter URLs based on rules"
+          />
+          <Toggle
+            k="enableURLContentFilter"
+            label="Enable Content Filter"
+            desc="Filter page content"
+          />
+        </div>
+      </Section>
+
+      {/* Blocked Processes */}
+      <Section id="blocked" title="Blocked Processes (Prohibited)">
         <Textarea
-          id="seb-blocked-processes"
           value={blockedProcessesText}
           onChange={(e) => setBlockedProcessesText(e.target.value)}
           rows={6}
@@ -855,12 +1337,27 @@ function SebSettingsTab() {
           className="font-mono text-sm"
         />
         <p className="text-xs text-muted-foreground">
-          These applications will be blocked while SEB is running
+          One process name per line. These will be killed while SEB is running.
         </p>
-      </div>
+      </Section>
+
+      {/* Permitted Processes */}
+      <Section id="permitted" title="Permitted Processes (Allowed)">
+        <Textarea
+          value={permittedProcessesText}
+          onChange={(e) => setPermittedProcessesText(e.target.value)}
+          rows={4}
+          placeholder="Calculator.exe&#10;Notepad.exe"
+          className="font-mono text-sm"
+        />
+        <p className="text-xs text-muted-foreground">
+          One process name per line. These applications are allowed during the
+          exam.
+        </p>
+      </Section>
 
       {/* Save button */}
-      <div className="flex justify-end">
+      <div className="sticky bottom-0 flex justify-end border-t bg-background pt-4">
         <Button onClick={handleSave} disabled={saveMutation.isPending}>
           {saveMutation.isPending && (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
