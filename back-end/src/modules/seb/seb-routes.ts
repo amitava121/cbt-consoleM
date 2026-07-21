@@ -30,7 +30,9 @@ async function getSebSettings(): Promise<Record<string, unknown>> {
   }
 
   try {
-    return JSON.parse(row.value) as Record<string, unknown>;
+    const parsed = JSON.parse(row.value) as Record<string, unknown>;
+    // Merge with defaults to ensure new keys are present for old records
+    return { ...DEFAULT_SEB_SETTINGS, ...parsed };
   } catch {
     return { enabled: false, ...DEFAULT_SEB_SETTINGS };
   }

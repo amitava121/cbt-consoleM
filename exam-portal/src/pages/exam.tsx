@@ -166,7 +166,12 @@ export default function CandidateExamPage() {
       }
     },
     onError: (err: any) => {
-      toast.error(err.response?.data?.error ?? "Failed to start exam");
+      const errData = err.response?.data?.error;
+      const msg =
+        typeof errData === "string"
+          ? errData
+          : (errData?.message ?? "Failed to start exam");
+      toast.error(msg);
     },
   });
 
@@ -206,7 +211,12 @@ export default function CandidateExamPage() {
       queryClient.invalidateQueries({ queryKey: ["candidate-exams"] });
       navigate("/exams");
     } catch (err: any) {
-      toast.error(err.response?.data?.error ?? "Submit failed");
+      const errData = err.response?.data?.error;
+      const msg =
+        typeof errData === "string"
+          ? errData
+          : (errData?.message ?? "Submit failed");
+      toast.error(msg);
     } finally {
       setSubmitting(false);
     }
@@ -286,6 +296,11 @@ export default function CandidateExamPage() {
       try {
         const fp = localStorage.getItem("candidateDeviceFp") ?? undefined;
         const res: any = await candidateService.heartbeat(fp);
+        if (res?.terminated) {
+          setForceLogout(true);
+          toast.error("Exam has been stopped by the administrator.");
+          return;
+        }
         if (res?.autoResumed) {
           setServerPaused(false);
           toast.success("Connection restored. Exam resumed.");
@@ -319,7 +334,7 @@ export default function CandidateExamPage() {
     };
 
     sendHeartbeat();
-    const interval = setInterval(sendHeartbeat, 30_000);
+    const interval = setInterval(sendHeartbeat, 10_000);
     return () => clearInterval(interval);
   }, [examStarted, attemptId, forceLogout]);
 

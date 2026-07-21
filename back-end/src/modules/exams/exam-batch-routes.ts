@@ -1,22 +1,26 @@
 import { and, asc, eq, ilike, inArray, sql } from "drizzle-orm";
 import {
-  type FastifyPluginAsync,
-  type FastifyReply,
-  type FastifyRequest,
+    type FastifyPluginAsync,
+    type FastifyReply,
+    type FastifyRequest,
 } from "fastify";
 import { z } from "zod";
 import { db } from "../../database/db.js";
 import {
-  attempts,
-  batchCandidates,
-  batches,
-  candidates,
-  examBatchCandidates,
-  examBatches,
-  exams,
-  subjects,
+    attempts,
+    batchCandidates,
+    batches,
+    candidates,
+    examBatchCandidates,
+    examBatches,
+    exams,
+    subjects,
 } from "../../database/schemas/index.js";
 import { requireRole } from "../../middleware/rbac.js";
+import {
+    getActiveAttempts,
+    terminateAttempt,
+} from "../../modules/sessions/session-service.js";
 
 /* ---------- Schemas ---------- */
 
@@ -294,7 +298,11 @@ const examBatchRoutes: FastifyPluginAsync = async (app) => {
         .limit(1);
 
       if (!batch)
-        return { code: 404 as const, body: { error: "Exam batch not found" } };
+        return {
+          code: 404 as const,
+          body: { error: "Exam batch not found" },
+          batchId: undefined,
+        };
 
       if (!assertTransition(batch.status, targetStatus))
         return {
@@ -302,6 +310,7 @@ const examBatchRoutes: FastifyPluginAsync = async (app) => {
           body: {
             error: `Cannot transition from '${batch.status}' to '${targetStatus}'`,
           },
+          batchId: undefined,
         };
 
       const updateData: Record<string, unknown> = {
@@ -337,7 +346,9 @@ const examBatchRoutes: FastifyPluginAsync = async (app) => {
           }
         }
       }
-      if (targetStatus === "finished") updateData.actualEndAt = new Date();
+      if (targetStatus === "finished") {
+        updateData.actualEndAt = new Date();
+      }
 
       const [updated] = await tx
         .update(examBatches)
@@ -345,8 +356,24 @@ const examBatchRoutes: FastifyPluginAsync = async (app) => {
         .where(eq(examBatches.id, id))
         .returning();
 
-      return { code: 200 as const, body: updated };
+      return { code: 200 as const, body: updated, batchId: id };
     });
+
+    // When finishing, terminate all active attempts OUTSIDE the transaction
+    // so SEB closes on the candidate's machine
+    if (targetStatus === "finished" && result.code === 200) {
+      try {
+        const activeAttempts = await getActiveAttempts(result.batchId);
+        for (const attempt of activeAttempts) {
+          await terminateAttempt(attempt.id, "admin", "Exam stopped by admin");
+        }
+      } catch (err) {
+        request.log.error(
+          { err, examBatchId: result.batchId },
+          "Failed to terminate active attempts on finish",
+        );
+      }
+    }
 
     return reply.code(result.code).send(result.body);
   };

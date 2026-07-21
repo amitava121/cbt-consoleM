@@ -30,12 +30,18 @@ export default function CandidateLogin() {
         dateOfBirth,
         fingerprint,
       );
-      localStorage.setItem("candidateAccessToken", res.accessToken);
-      localStorage.setItem("candidateRefreshToken", res.refreshToken);
-      toast.success(`Welcome, ${res.user?.fullName ?? "Candidate"}`);
+      const tokenData = res.data ?? res;
+      localStorage.setItem("candidateAccessToken", tokenData.accessToken);
+      localStorage.setItem("candidateRefreshToken", tokenData.refreshToken);
+      toast.success(`Welcome, ${tokenData.user?.fullName ?? "Candidate"}`);
       navigate("/exams");
     } catch (err: any) {
-      toast.error(err.response?.data?.error ?? "Login failed");
+      const errData = err.response?.data?.error;
+      const msg =
+        typeof errData === "string"
+          ? errData
+          : (errData?.message ?? "Login failed");
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -98,12 +104,6 @@ export default function CandidateLogin() {
               {loading ? "Signing in..." : "Sign In"}
             </Button>
           </form>
-          <p className="mt-4 text-center text-xs text-muted-foreground">
-            Admin?{" "}
-            <a href="/login" className="text-blue-600 hover:underline">
-              Go to admin login
-            </a>
-          </p>
         </CardContent>
       </Card>
     </div>

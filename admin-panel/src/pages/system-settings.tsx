@@ -770,20 +770,47 @@ function SebSettingsTab() {
     label: string;
     placeholder?: string;
     type?: string;
-  }) => (
-    <div className="space-y-1">
-      <Label className="text-xs">{label}</Label>
-      <Input
-        type={type ?? "text"}
-        value={(form[k] as string) ?? ""}
-        onChange={(e) => setStr(k, e.target.value)}
-        placeholder={placeholder}
-      />
-    </div>
-  );
+  }) => {
+    const [focused, setFocused] = useState(false);
+    return (
+      <div className="space-y-1">
+        <Label className="text-xs">{label}</Label>
+        <Input
+          type={type ?? "text"}
+          autoComplete="off"
+          name={`seb-field-${k}`}
+          value={(form[k] as string) ?? ""}
+          onChange={(e) => setStr(k, e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          placeholder={placeholder}
+          readOnly={!focused && type === "password" ? true : undefined}
+          data-lpignore="true"
+          data-1p-ignore="true"
+        />
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6 max-w-3xl">
+      {/* Hidden inputs to absorb browser autofill */}
+      <input
+        type="text"
+        name="fake-username"
+        autoComplete="username"
+        className="hidden"
+        tabIndex={-1}
+        aria-hidden="true"
+      />
+      <input
+        type="password"
+        name="fake-password"
+        autoComplete="new-password"
+        className="hidden"
+        tabIndex={-1}
+        aria-hidden="true"
+      />
       <div className="rounded-lg border p-4 bg-muted/30">
         <div className="flex items-center gap-2 mb-2">
           <Monitor className="h-5 w-5 text-primary" />
@@ -827,11 +854,6 @@ function SebSettingsTab() {
             placeholder="https://seb-server.example.com"
           />
           <TextInput
-            k="quitUrl"
-            label="Quit URL (optional)"
-            placeholder="https://exam.example.com/quit"
-          />
-          <TextInput
             k="quitPassword"
             label="Quit Password (optional)"
             type="password"
@@ -850,19 +872,9 @@ function SebSettingsTab() {
             desc="Allow students to quit SEB"
           />
           <Toggle
-            k="quitUrlConfirm"
-            label="Confirm Quit URL"
-            desc="Show confirmation dialog before quitting"
-          />
-          <Toggle
             k="ignoreExitKeys"
             label="Ignore Exit Keys"
             desc="Ignore standard SEB exit key combinations"
-          />
-          <Toggle
-            k="quitURLRestart"
-            label="Quit URL Restart"
-            desc="Restart exam when quitting to quitURL"
           />
         </div>
       </Section>

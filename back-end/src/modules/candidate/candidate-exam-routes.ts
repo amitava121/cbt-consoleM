@@ -560,6 +560,7 @@ const candidateExamRoutes: FastifyPluginAsync = async (app) => {
 
     // Refresh the attempt active key for auto-pause detection
     // Also auto-resume if the attempt was auto-paused (within grace period)
+    // Also detect terminated attempts (admin stopped exam) to trigger SEB close
     const [activeAttempt] = await db
       .select({
         id: attempts.id,
@@ -569,12 +570,23 @@ const candidateExamRoutes: FastifyPluginAsync = async (app) => {
       .where(
         and(
           eq(attempts.candidateId, userId),
-          inArray(attempts.status, ["in_progress", "paused"]),
+          inArray(attempts.status, [
+            "in_progress",
+            "paused",
+            "terminated",
+            "force_submitted",
+          ]),
         ),
       )
       .limit(1);
 
     if (activeAttempt) {
+      if (
+        activeAttempt.status === "terminated" ||
+        activeAttempt.status === "force_submitted"
+      ) {
+        return { ok: true, terminated: true };
+      }
       if (activeAttempt.status === "paused") {
         // Try to auto-resume (will only succeed within 5-min grace period)
         const resumed = await autoResumeAttempt(activeAttempt.id);

@@ -98,21 +98,25 @@ export const candidateService = {
     return candidateApi.post("/candidate/exams/heartbeat", {}, { headers });
   },
 
-  getExams: () =>
-    candidateApi.get<unknown, CandidateExam[]>("/candidate/exams"),
+  getExams: async () => {
+    const res = await candidateApi.get("/candidate/exams");
+    return (res as any).data ?? res;
+  },
 
-  getExamMeta: (batchId: string) =>
-    candidateApi.get<unknown, CandidateExam>(`/candidate/exams/${batchId}`),
+  getExamMeta: async (batchId: string) => {
+    const res = await candidateApi.get(`/candidate/exams/${batchId}`);
+    return (res as any).data ?? res;
+  },
 
-  getQuestions: (batchId: string) =>
-    candidateApi.get<unknown, CandidateQuestion[]>(
-      `/candidate/exams/${batchId}/questions`,
-    ),
+  getQuestions: async (batchId: string) => {
+    const res = await candidateApi.get(`/candidate/exams/${batchId}/questions`);
+    return (res as any).data ?? res;
+  },
 
-  startExam: (batchId: string) =>
-    candidateApi.post<unknown, ExamStartResponse>(
-      `/candidate/exams/${batchId}/start`,
-    ),
+  startExam: async (batchId: string) => {
+    const res = await candidateApi.post(`/candidate/exams/${batchId}/start`);
+    return (res as any).data ?? res;
+  },
 
   saveAnswer: (
     attemptId: string,
@@ -133,25 +137,10 @@ export const candidateService = {
   submitExam: (attemptId: string) =>
     candidateApi.post(`/sessions/${attemptId}/submit`),
 
-  getAttemptState: (attemptId: string) =>
-    candidateApi.get<
-      unknown,
-      {
-        attemptId: string;
-        status: string;
-        remainingTimeSecs: number;
-        answers: Record<
-          string,
-          {
-            answerData: unknown;
-            status: string;
-            timeSpentSecs: number;
-            isMarkedForReview: boolean;
-          }
-        >;
-        serverTime: number;
-      }
-    >(`/sessions/${attemptId}/state`),
+  getAttemptState: async (attemptId: string) => {
+    const res = await candidateApi.get(`/sessions/${attemptId}/state`);
+    return (res as any).data ?? res;
+  },
 
   reportViolation: (
     attemptId: string,
