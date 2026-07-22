@@ -251,7 +251,7 @@ const sebRoutes: FastifyPluginAsync = async (app) => {
     const globalStartUrl = (sebSettings.startUrl as string) ?? "";
     const startUrl =
       globalStartUrl ||
-      `${request.protocol}://${request.hostname}/exam/${batchId}`;
+      `${request.protocol}://${request.hostname}/examportal/login`;
 
     const configOptions: SebConfigOptions = {
       examBatchId: batchId,
@@ -286,7 +286,7 @@ const sebRoutes: FastifyPluginAsync = async (app) => {
       const globalStartUrl = (sebSettings.startUrl as string) ?? "";
       const startUrl =
         globalStartUrl ||
-        `${request.protocol}://${request.hostname}/exam/${batchId}`;
+        `${request.protocol}://${request.hostname}/examportal/login`;
       const configUrl = `${request.protocol}://${request.hostname}/api/v1/seb/${batchId}/config.seb`;
 
       return reply.send({
@@ -324,7 +324,7 @@ const sebRoutes: FastifyPluginAsync = async (app) => {
     const globalStartUrl = (sebSettings.startUrl as string) ?? "";
     const startUrl =
       globalStartUrl ||
-      `${request.protocol}://${request.hostname}/exam/${batchId}`;
+      `${request.protocol}://${request.hostname}/examportal/login`;
 
     return reply.send({
       sebRequired: true,

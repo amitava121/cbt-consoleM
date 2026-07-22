@@ -192,6 +192,10 @@ await app.register(
 
     await v1Scope.register(async (protectedScope) => {
       protectedScope.addHook("onRequest", async (request, reply) => {
+        // Allow public access to SEB config download (SEB needs it before login)
+        if (request.url.match(/\/seb\/[^/]+\/config\.seb$/)) {
+          return;
+        }
         const authHeader = request.headers.authorization;
         if (!authHeader?.startsWith("Bearer ")) {
           return reply.code(401).send({ error: "Missing access token" });
@@ -233,6 +237,10 @@ await app.register(authRoutes, { prefix: "/api/auth" });
 
 await app.register(async (protectedScope) => {
   protectedScope.addHook("onRequest", async (request, reply) => {
+    // Allow public access to SEB config download (SEB needs it before login)
+    if (request.url.match(/\/seb\/[^/]+\/config\.seb$/)) {
+      return;
+    }
     const authHeader = request.headers.authorization;
     if (!authHeader?.startsWith("Bearer ")) {
       return reply.code(401).send({ error: "Missing access token" });

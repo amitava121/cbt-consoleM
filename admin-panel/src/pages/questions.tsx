@@ -664,13 +664,13 @@ export default function QuestionsPage({
               Create Exam
             </Button>
           )}
-          <div className="relative">
+          <div className="relative z-20">
             <Button size="sm" onClick={() => setAddMenuOpen((v) => !v)}>
               <Plus className="mr-1.5 h-3.5 w-3.5" />
               Add Question
             </Button>
             {addMenuOpen && (
-              <div className="absolute right-0 top-full mt-1 z-10 rounded-md border border-border bg-popover shadow-md w-44">
+              <div className="absolute right-0 top-full mt-1 z-50 rounded-md border border-border bg-popover shadow-md w-44">
                 <button
                   className="flex w-full items-center px-3 py-2 text-sm hover:bg-accent"
                   onClick={() => {

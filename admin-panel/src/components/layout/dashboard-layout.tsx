@@ -181,7 +181,9 @@ export default function DashboardLayout() {
   const { data: auditLogsData } = useQuery({
     queryKey: ["audit-logs-notifications"],
     queryFn: () => auditLogService.list({ page: 1, pageSize: 10 }),
-    staleTime: 30 * 1000,
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   // Automatically map real system activity into notifications without re-adding removed ones
@@ -248,13 +250,13 @@ export default function DashboardLayout() {
     <div className="flex h-screen overflow-hidden bg-background">
       {/* Modern Floating Glass Sidebar */}
       <aside
-        className={`flex flex-col border-r border-border/80 bg-card/60 backdrop-blur-xl transition-all duration-300 z-20 shrink-0 ${
+        className={`flex flex-col border-r border-border bg-card transition-[width] duration-200 z-20 shrink-0 ${
           collapsed ? "w-18" : "w-64"
         }`}
       >
         {/* Brand Logo Header */}
-        <div className="flex h-16 items-center gap-3 border-b border-border/60 px-4 shrink-0">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 text-white shadow-md shadow-indigo-500/20">
+        <div className="flex h-16 items-center gap-3 border-b border-border px-4 shrink-0">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 text-white shadow-sm">
             <GraduationCap className="h-5 w-5" />
           </div>
           {!collapsed && (
@@ -283,14 +285,14 @@ export default function DashboardLayout() {
               end={item.end}
               title={collapsed ? item.label : undefined}
               className={({ isActive }) =>
-                `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 group relative ${
+                `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors group ${
                   isActive
-                    ? "bg-primary text-primary-foreground font-semibold shadow-sm shadow-primary/25"
-                    : "text-muted-foreground hover:bg-accent/80 hover:text-foreground"
+                    ? "bg-primary text-primary-foreground font-semibold"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
                 }`
               }
             >
-              <item.icon className="h-4.5 w-4.5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
+              <item.icon className="h-4.5 w-4.5 shrink-0" />
               {!collapsed && <span className="truncate">{item.label}</span>}
             </NavLink>
           ))}
@@ -300,7 +302,7 @@ export default function DashboardLayout() {
       {/* Main Right Content Panel */}
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Top Navbar Header */}
-        <header className="flex h-16 items-center justify-between border-b border-border/80 bg-card/40 backdrop-blur-xl px-6 z-10 shrink-0">
+        <header className="flex h-16 items-center justify-between border-b border-border bg-card px-6 z-10 shrink-0">
           <div className="flex items-center gap-3">
             <Button
               variant="ghost"
@@ -346,7 +348,7 @@ export default function DashboardLayout() {
                 >
                   <Bell className="h-4 w-4 text-muted-foreground" />
                   {unreadCount > 0 && (
-                    <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground shadow-xs animate-pulse">
+                    <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground">
                       {unreadCount}
                     </span>
                   )}
@@ -476,10 +478,10 @@ export default function DashboardLayout() {
         </header>
 
         {/* Sticky Prominent Page Header Bar with Title and Subtitle */}
-        <div className="sticky top-0 z-10 flex py-3.5 px-6 sm:px-8 items-center justify-between border-b border-border/80 bg-card/70 backdrop-blur-xl shrink-0 shadow-2xs">
+        <div className="sticky top-0 z-10 flex py-3.5 px-6 sm:px-8 items-center justify-between border-b border-border bg-card shrink-0">
           <div className="flex flex-col min-w-0 pr-4">
             <div className="flex items-center gap-2.5">
-              <div className="h-2.5 w-2.5 rounded-full bg-primary animate-pulse shrink-0" />
+              <div className="h-2.5 w-2.5 rounded-full bg-primary shrink-0" />
               <h1 className="text-xl sm:text-2xl font-black tracking-tight text-foreground truncate">
                 {currentPageTitle}
               </h1>
@@ -499,7 +501,7 @@ export default function DashboardLayout() {
 
         {/* Dynamic Route Content Outlet */}
 
-        <main className="flex-1 overflow-auto p-6 md:p-8 bg-gradient-to-b from-background via-background to-background/95">
+        <main className="flex-1 overflow-auto p-6 md:p-8">
           <div className="mx-auto max-w-7xl w-full">
             <Outlet />
           </div>

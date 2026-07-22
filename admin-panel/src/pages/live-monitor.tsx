@@ -228,7 +228,7 @@ export default function LiveMonitorPage() {
           <option value="">Select a batch...</option>
           {examBatches.map((b) => (
             <option key={b.id} value={b.id}>
-              {b.name} ({b.status})
+              {b.examName ?? b.name} ({b.status})
             </option>
           ))}
         </select>

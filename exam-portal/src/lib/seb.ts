@@ -15,14 +15,17 @@ export function isRunningInSeb(): boolean {
  * Generates the seb:// launch URL for an exam batch.
  * This URL opens SEB with the config downloaded from the server.
  */
-export function getSebLaunchUrl(examBatchId: string, startUrl?: string): string {
+export function getSebLaunchUrl(
+  examBatchId: string,
+  startUrl?: string,
+): string {
   const origin = window.location.origin;
   const configUrl = `${origin}/api/v1/seb/${examBatchId}/config.seb`;
   const url = `seb://${configUrl}`;
   if (startUrl) {
     return `${url}?starturl=${encodeURIComponent(startUrl)}`;
   }
-  return url;
+  return `${url}?starturl=${encodeURIComponent(`${origin}/examportal/login`)}`;
 }
 
 /**

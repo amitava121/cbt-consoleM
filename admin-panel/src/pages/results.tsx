@@ -1,5 +1,6 @@
-import { BarChart3, FileText, Loader2, Trophy } from "lucide-react";
+import { BarChart3, Eye, FileText, Loader2, Trophy } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
     Card,
@@ -23,6 +24,7 @@ import {
 } from "../services/results";
 
 export default function ResultsPage() {
+  const navigate = useNavigate();
   const [examBatchId, setExamBatchId] = useState("");
   const [batches, setBatches] = useState<{ id: string; name: string }[]>([]);
   const [results, setResults] = useState<BatchResultRow[]>([]);
@@ -206,6 +208,7 @@ export default function ResultsPage() {
                   <TableHead className="text-right">Score</TableHead>
                   <TableHead className="text-right">Marks</TableHead>
                   <TableHead className="text-right">Percentile</TableHead>
+                  <TableHead className="text-center">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -228,6 +231,15 @@ export default function ResultsPage() {
                     </TableCell>
                     <TableCell className="text-right">
                       {r.percentile ? parseFloat(r.percentile).toFixed(1) : "—"}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <button
+                        onClick={() => navigate(`/results/${r.attemptId}`)}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent"
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                        View
+                      </button>
                     </TableCell>
                   </TableRow>
                 ))}

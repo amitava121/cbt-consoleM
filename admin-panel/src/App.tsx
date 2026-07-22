@@ -16,6 +16,7 @@ const ExamDetailPage = lazy(() => import("./pages/exam-detail"));
 const DevicesPage = lazy(() => import("./pages/devices"));
 const LiveMonitorPage = lazy(() => import("./pages/live-monitor"));
 const ResultsPage = lazy(() => import("./pages/results"));
+const AttemptReportPage = lazy(() => import("./pages/attempt-report"));
 const ViolationsPage = lazy(() => import("./pages/violations"));
 const AnalyticsPage = lazy(() => import("./pages/analytics"));
 const AuditLogsPage = lazy(() => import("./pages/audit-logs"));
@@ -74,6 +75,7 @@ export default function App() {
               <Route path="exams/:id" element={<ExamDetailPage />} />
               <Route path="live-monitor" element={<LiveMonitorPage />} />
               <Route path="results" element={<ResultsPage />} />
+              <Route path="results/:attemptId" element={<AttemptReportPage />} />
               <Route path="violations" element={<ViolationsPage />} />
               <Route path="analytics" element={<AnalyticsPage />} />
               <Route path="audit-logs" element={<AuditLogsPage />} />

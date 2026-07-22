@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, Upload } from "lucide-react";
+import { ArrowLeft, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -128,10 +128,6 @@ export default function ExamDetailPage() {
             Back
           </Button>
         </div>
-        <Button size="sm" onClick={() => setImportOpen(true)}>
-          <Upload className="mr-1.5 h-3.5 w-3.5" />
-          Import Questions (Excel)
-        </Button>
       </div>
 
       {exam.description && (

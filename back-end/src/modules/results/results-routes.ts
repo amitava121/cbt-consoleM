@@ -1,8 +1,17 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { type FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { db } from "../../database/db.js";
-import { examBatches } from "../../database/schemas/index.js";
+import {
+    answers,
+    attempts,
+    examBatches,
+    examQuestions,
+    examSections,
+    exams,
+    questionOptions,
+    questions,
+} from "../../database/schemas/index.js";
 import { requireRole } from "../../middleware/rbac.js";
 import {
     calculateRanks,
@@ -128,6 +137,115 @@ const resultsRoutes: FastifyPluginAsync = async (app) => {
     }
 
     return reply.send({ success: true, ...result });
+  });
+
+  /**
+   * GET /results/attempt/:attemptId/answer-sheet
+   * Returns the exam paper with correct answers marked for admin review.
+   */
+  app.get("/attempt/:attemptId/answer-sheet", async (request, reply) => {
+    const { attemptId } = request.params as { attemptId: string };
+
+    if (!z.string().uuid().safeParse(attemptId).success) {
+      return reply.code(400).send({ error: "Invalid attempt ID" });
+    }
+
+    // Get attempt -> batch -> exam
+    const attemptData = await db
+      .select({
+        examId: examBatches.examId,
+        examName: exams.name,
+        examCode: exams.code,
+        durationMinutes: exams.durationMinutes,
+        totalMarks: exams.totalMarks,
+      })
+      .from(attempts)
+      .innerJoin(examBatches, eq(examBatches.id, attempts.examBatchId))
+      .innerJoin(exams, eq(exams.id, examBatches.examId))
+      .where(eq(attempts.id, attemptId))
+      .limit(1);
+
+    if (attemptData.length === 0) {
+      return reply.code(404).send({ error: "Attempt not found" });
+    }
+
+    const { examId, examName, examCode, durationMinutes, totalMarks } = attemptData[0];
+
+    // Get sections and questions
+    const [sectionRows, examQs] = await Promise.all([
+      db.select().from(examSections).where(eq(examSections.examId, examId)).orderBy(examSections.sectionOrder),
+      db.select({
+        examQuestionId: examQuestions.id,
+        examSectionId: examQuestions.examSectionId,
+        questionId: examQuestions.questionId,
+        displayOrder: examQuestions.displayOrder,
+        isOptional: examQuestions.isOptional,
+        type: questions.type,
+        content: questions.contentJson,
+      })
+        .from(examQuestions)
+        .innerJoin(questions, eq(examQuestions.questionId, questions.id))
+        .innerJoin(examSections, eq(examQuestions.examSectionId, examSections.id))
+        .where(eq(examSections.examId, examId))
+        .orderBy(examQuestions.displayOrder),
+    ]);
+
+    // Get ALL options WITH isCorrect for admin review
+    const questionIds = examQs.map((q) => q.questionId);
+    const optionsMap: Record<string, { id: string; text: string; displayOrder: number; isCorrect: boolean }[]> = {};
+    if (questionIds.length > 0) {
+      const opts = await db
+        .select()
+        .from(questionOptions)
+        .where(inArray(questionOptions.questionId, questionIds))
+        .orderBy(questionOptions.displayOrder);
+
+      for (const opt of opts) {
+        if (!optionsMap[opt.questionId]) optionsMap[opt.questionId] = [];
+        optionsMap[opt.questionId].push({
+          id: opt.id,
+          text: opt.optionText,
+          displayOrder: opt.displayOrder,
+          isCorrect: opt.isCorrect,
+        });
+      }
+    }
+
+    // Get candidate's answers
+    const candidateAnswers = await db
+      .select({
+        questionId: answers.questionId,
+        answerDataJson: answers.answerDataJson,
+        status: answers.status,
+        timeSpentSecs: answers.timeSpentSecs,
+      })
+      .from(answers)
+      .where(eq(answers.attemptId, attemptId));
+
+    const answersMap: Record<string, { answerData: unknown; status: string; timeSpentSecs: number }> = {};
+    for (const a of candidateAnswers) {
+      answersMap[a.questionId] = {
+        answerData: a.answerDataJson,
+        status: a.status,
+        timeSpentSecs: a.timeSpentSecs,
+      };
+    }
+
+    return reply.send({
+      exam: { name: examName, code: examCode, durationMinutes, totalMarks },
+      sections: sectionRows,
+      questions: examQs.map((q) => ({
+        examQuestionId: q.examQuestionId,
+        examSectionId: q.examSectionId,
+        questionId: q.questionId,
+        displayOrder: q.displayOrder,
+        isOptional: q.isOptional,
+        type: q.type,
+        content: q.content,
+        options: optionsMap[q.questionId] ?? [],
+      })),
+      answers: answersMap,
+    });
   });
 
   app.post("/batch/:examBatchId/publish", async (request, reply) => {
