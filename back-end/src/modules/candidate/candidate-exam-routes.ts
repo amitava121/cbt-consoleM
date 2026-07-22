@@ -476,7 +476,7 @@ const candidateExamRoutes: FastifyPluginAsync = async (app) => {
         .values({
           examBatchId: batchId,
           candidateId: candidate.id,
-          deviceId: deviceUuid ?? "00000000-0000-0000-0000-000000000000",
+          deviceId: deviceUuid ?? null as any,
           status: "in_progress",
           startedAt: now,
           remainingTimeSecs: durationSecs,

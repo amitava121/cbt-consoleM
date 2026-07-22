@@ -24,23 +24,13 @@ interface UIState {
 }
 
 const getInitialTheme = (): ThemeMode => {
-  const saved = localStorage.getItem("cbe-theme") as ThemeMode;
-  if (saved && ["dark", "light", "system"].includes(saved)) {
-    return saved;
-  }
-  return "dark";
+  return "light";
 };
 
-const applyThemeToDOM = (theme: ThemeMode) => {
+const applyThemeToDOM = (_theme: ThemeMode) => {
   const root = document.documentElement;
   root.classList.remove("light", "dark");
-
-  if (theme === "system") {
-    const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    root.classList.add(systemDark ? "dark" : "light");
-  } else {
-    root.classList.add(theme);
-  }
+  root.classList.add("light");
 };
 
 // Initial theme application on load

@@ -1,9 +1,9 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   CheckCircle2,
-  Command,
   Eye,
   EyeOff,
+  GraduationCap,
   Loader2,
   Lock,
   Mail,
@@ -107,7 +107,7 @@ export default function LoginPage() {
           {/* Top Brand Logo Tag */}
           <div className="relative z-10 flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 text-white shadow-lg shadow-indigo-500/30 group-hover:rotate-6 transition-transform duration-300">
-              <Command className="h-5 w-5" />
+              <GraduationCap className="h-5 w-5" />
             </div>
             <div className="flex flex-col">
               <span className="text-lg font-black tracking-tight text-white">
@@ -150,7 +150,7 @@ export default function LoginPage() {
         <div className="lg:col-span-6 flex flex-col justify-center p-6 sm:p-8 md:p-10 relative">
           <div className="space-y-3 text-center sm:text-left mb-6">
             <div className="lg:hidden mx-auto sm:mx-0 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-500 text-white shadow-lg shadow-indigo-500/30 mb-2">
-              <Command className="h-6 w-6" />
+              <GraduationCap className="h-6 w-6" />
             </div>
             <h1 className="text-2xl font-extrabold tracking-tight text-foreground">
               Sign In to Console

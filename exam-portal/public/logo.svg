@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Primary Shield Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0D47A1" />
+      <stop offset="60%" stop-color="#1565C0" />
+      <stop offset="100%" stop-color="#1E88E5" />
+    </linearGradient>
+
+    <!-- Document Page Gradient -->
+    <linearGradient id="docGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="100%" stop-color="#E3F2FD" />
+    </linearGradient>
+
+    <!-- Accent Badge Gradient -->
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1565C0" />
+      <stop offset="100%" stop-color="#0D47A1" />
+    </linearGradient>
+
+    <!-- Glow/Highlight Effect -->
+    <linearGradient id="highlightGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.25" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.0" />
+    </linearGradient>
+
+    <!-- Soft Drop Shadow -->
+    <filter id="dropShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#092547" flood-opacity="0.35" />
+    </filter>
+    
+    <filter id="docShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#0A2D58" flood-opacity="0.25" />
+    </filter>
+  </defs>
+
+  <!-- Outer Rounded Container / Base Shield -->
+  <rect x="32" y="32" width="448" height="448" rx="96" ry="96" fill="url(#bgGrad)" filter="url(#dropShadow)" />
+  
+  <!-- Subtle Inner Border Highlight -->
+  <rect x="34" y="34" width="444" height="444" rx="94" ry="94" fill="none" stroke="#64B5F6" stroke-width="3" stroke-opacity="0.4" />
+  
+  <!-- Subtle Top Lighting overlay -->
+  <path d="M 32,128 C 32,80 80,32 128,32 L 384,32 C 432,32 480,80 480,128 L 480,240 C 350,220 160,260 32,340 Z" fill="url(#highlightGrad)" />
+
+  <!-- Exam Document Icon -->
+  <g filter="url(#docShadow)">
+    <!-- Main Sheet -->
+    <rect x="136" y="112" width="240" height="288" rx="20" ry="20" fill="url(#docGrad)" />
+    
+    <!-- Header Accent Stripe on Document -->
+    <path d="M 136,132 C 136,121 145,112 156,112 L 356,112 C 367,112 376,121 376,132 L 376,156 L 136,156 Z" fill="#1976D2" />
+    
+    <!-- Header Dot Indicators (Security status) -->
+    <circle cx="164" cy="134" r="5" fill="#BBDEFB" />
+    <circle cx="180" cy="134" r="5" fill="#BBDEFB" />
+    <circle cx="196" cy="134" r="5" fill="#BBDEFB" />
+
+    <!-- Exam Content Lines (Simulated Question Paper / Data Grid) -->
+    <rect x="168" y="184" width="176" height="12" rx="6" fill="#90CAF9" />
+    <rect x="168" y="212" width="136" height="10" rx="5" fill="#BBDEFB" />
+    
+    <rect x="168" y="240" width="176" height="12" rx="6" fill="#90CAF9" />
+    <rect x="168" y="268" width="112" height="10" rx="5" fill="#BBDEFB" />
+
+    <!-- Computer / Digital Exam Circuit Grid Dots -->
+    <circle cx="180" cy="312" r="6" fill="#1565C0" />
+    <circle cx="212" cy="312" r="6" fill="#64B5F6" />
+    <circle cx="244" cy="312" r="6" fill="#64B5F6" />
+
+    <line x1="186" y1="312" x2="206" y2="312" stroke="#90CAF9" stroke-width="3" stroke-dasharray="2 2" />
+    <line x1="218" y1="312" x2="238" y2="312" stroke="#90CAF9" stroke-width="3" />
+  </g>
+
+  <!-- Floating Professional Badge & Checkmark (Verification Symbol) -->
+  <g filter="url(#dropShadow)">
+    <circle cx="344" cy="344" r="64" fill="url(#accentGrad)" stroke="#FFFFFF" stroke-width="6" />
+    
+    <!-- Bold Checkmark -->
+    <path d="M 314,344 L 334,364 L 376,322" fill="none" stroke="#FFFFFF" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" />
+  </g>
+</svg>

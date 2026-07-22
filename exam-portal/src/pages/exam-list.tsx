@@ -1,41 +1,10 @@
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { isRunningInSeb, launchSeb } from "@/lib/seb";
 import { candidateService, type CandidateExam } from "@/services/candidate";
 import { useQuery } from "@tanstack/react-query";
-import {
-    Clock,
-    FileText,
-    Loader2,
-    LogOut,
-    MonitorDown,
-    Play,
-    ShieldCheck,
-} from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-
-function getStatusBadge(status: string) {
-  const variants: Record<
-    string,
-    "success" | "info" | "secondary" | "destructive"
-  > = {
-    active: "success",
-    published: "info",
-    scheduled: "secondary",
-    finished: "destructive",
-    draft: "secondary",
-  };
-  return (
-    <Badge variant={variants[status] ?? "secondary"} className="capitalize">
-      {status.replace("_", " ")}
-    </Badge>
-  );
-}
 
 export default function CandidateExamList() {
   const navigate = useNavigate();
-  const sebMode = isRunningInSeb();
   const { data: exams, isLoading } = useQuery({
     queryKey: ["candidate-exams"],
     queryFn: candidateService.getExams,
@@ -51,117 +20,88 @@ export default function CandidateExamList() {
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+      <div style={{ display: "flex", minHeight: "100vh", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#F5F5F5" }}>
+        <Loader2 className="h-6 w-6 animate-spin" style={{ color: "#1565C0" }} />
+        <p style={{ fontSize: 13, color: "#757575", marginTop: 12 }}>Loading examinations...</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4 md:p-8">
-      <div className="mx-auto max-w-4xl">
-        <div className="mb-6 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">My Exams</h1>
-            <p className="text-sm text-muted-foreground">
-              Your assigned examinations
-            </p>
+    <div style={{ minHeight: "100vh", background: "#F5F5F5" }}>
+      {/* Header */}
+      <div style={{ background: "#FFFFFF", borderBottom: "1px solid #E0E0E0", padding: "16px 32px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            {/* Logo */}
+            <div style={{ width: 44, height: 44, borderRadius: 12, background: "linear-gradient(135deg, #0D47A1, #1565C0, #1E88E5)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <span style={{ color: "#FFFFFF", fontSize: 20, fontWeight: 700 }}>✓</span>
+            </div>
+            <div>
+              <h1 style={{ fontSize: 22, fontWeight: 600, color: "#212121", margin: 0 }}>
+                Welcome, <span style={{ fontWeight: 700 }}>Candidate</span>
+              </h1>
+              <p style={{ fontSize: 13, color: "#757575", marginTop: 2, margin: 0 }}>Your assigned examinations</p>
+            </div>
           </div>
-          <Button variant="outline" size="sm" onClick={handleLogout}>
-            <LogOut className="mr-2 h-4 w-4" />
-            Logout
-          </Button>
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <div style={{ textAlign: "right" }}>
+              <p style={{ fontSize: 12, color: "#757575", margin: 0 }}>CBT Exam Platform</p>
+              <p style={{ fontSize: 13, fontWeight: 600, color: "#212121", marginTop: 2 }}>Session Active</p>
+            </div>
+            <button onClick={handleLogout} style={{ background: "#FFFFFF", border: "1px solid #E0E0E0", borderRadius: 6, padding: "6px 12px", fontSize: 12, color: "#757575", cursor: "pointer" }}>
+              Logout
+            </button>
+          </div>
         </div>
+      </div>
+
+      {/* Content */}
+      <div style={{ padding: "24px 32px", maxWidth: 900 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 600, color: "#212121", marginBottom: 16 }}>Assigned Examinations</h2>
 
         {!exams || exams.length === 0 ? (
-          <Card className="shadow-lg">
-            <CardContent className="flex flex-col items-center justify-center py-16">
-              <FileText className="mb-3 h-12 w-12 text-muted-foreground" />
-              <p className="text-lg font-medium">No exams assigned</p>
-              <p className="text-sm text-muted-foreground">
-                Check back later or contact your administrator.
-              </p>
-            </CardContent>
-          </Card>
+          <div style={{ background: "#FFFFFF", borderRadius: 8, border: "1px solid #E0E0E0", padding: 60, textAlign: "center" }}>
+            <p style={{ fontSize: 16, fontWeight: 500, color: "#212121" }}>No exams assigned</p>
+            <p style={{ fontSize: 13, color: "#757575", marginTop: 4 }}>Check back later or contact your administrator.</p>
+          </div>
         ) : (
-          <div className="grid gap-4">
+          <div>
             {exams.map((exam: CandidateExam) => (
-              <Card
-                key={exam.examBatchId}
-                className="shadow-md hover:shadow-lg transition-shadow"
-              >
-                <CardHeader>
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <CardTitle className="text-lg">{exam.examName}</CardTitle>
-                    </div>
-                    {getStatusBadge(exam.status)}
+              <div key={exam.examBatchId} style={{ background: "#FFFFFF", borderRadius: 8, border: "1px solid #E0E0E0", marginBottom: 16, boxShadow: "0 1px 8px rgba(0,0,0,0.06)", display: "flex", overflow: "hidden" }}>
+                {/* Left accent */}
+                <div style={{ width: 6, background: "#1565C0", borderRadius: "8px 0 0 8px", flexShrink: 0 }} />
+                {/* Info */}
+                <div style={{ flex: 1, padding: "18px 12px 18px 20px" }}>
+                  <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
+                    <span style={{ fontSize: 17, fontWeight: 600, color: "#212121" }}>{exam.examName}</span>
+                    <span style={{ marginLeft: 12, background: "#DFF6DD", borderRadius: 4, padding: "3px 8px", fontSize: 11, fontWeight: 600, color: "#107C10", textTransform: "capitalize" }}>{exam.status}</span>
                   </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex flex-wrap gap-4 text-sm text-muted-foreground mb-4">
-                    <div className="flex items-center gap-1">
-                      <Clock className="h-4 w-4" />
-                      {exam.durationMinutes} min
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <FileText className="h-4 w-4" />
-                      {exam.totalMarks} marks
-                    </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", marginTop: 4 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, marginRight: 24, marginBottom: 6, fontSize: 13, color: "#757575" }}>
+                      <span style={{ fontSize: 14 }}>⏱</span>{exam.durationMinutes} minutes
+                    </span>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, marginRight: 24, marginBottom: 6, fontSize: 13, color: "#757575" }}>
+                      <span style={{ fontSize: 14 }}>📝</span>{exam.totalMarks} marks
+                    </span>
                     {exam.scheduledAt && (
-                      <div>
-                        Scheduled: {new Date(exam.scheduledAt).toLocaleString()}
-                      </div>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 6, fontSize: 13, color: "#757575" }}>
+                        <span style={{ fontSize: 14 }}>📅</span>{new Date(exam.scheduledAt).toLocaleString()}
+                      </span>
                     )}
                   </div>
-                  <div className="flex flex-col gap-2">
-                    {sebMode ? (
-                      <Button
-                        disabled={!canStart(exam.status)}
-                        onClick={() => navigate(`/exam/${exam.examBatchId}`)}
-                        className="w-full"
-                      >
-                        <Play className="mr-2 h-4 w-4" />
-                        {canStart(exam.status) ? "Start Exam" : "Not Available"}
-                      </Button>
-                    ) : (
-                      <>
-                        <Button
-                          disabled={!canStart(exam.status)}
-                          onClick={() =>
-                            launchSeb(
-                              exam.examBatchId,
-                              `${window.location.origin}/exam/${exam.examBatchId}`,
-                            )
-                          }
-                          className="w-full"
-                        >
-                          <ShieldCheck className="mr-2 h-4 w-4" />
-                          {canStart(exam.status)
-                            ? "Launch in SEB"
-                            : "Not Available"}
-                        </Button>
-                        <Button
-                          disabled={!canStart(exam.status)}
-                          variant="outline"
-                          onClick={() => navigate(`/exam/${exam.examBatchId}`)}
-                          className="w-full"
-                        >
-                          <Play className="mr-2 h-4 w-4" />
-                          Open in Browser (No SEB)
-                        </Button>
-                      </>
-                    )}
-                    {!sebMode && (
-                      <p className="flex items-center gap-1 text-xs text-amber-600">
-                        <MonitorDown className="h-3 w-3" />
-                        SEB recommended for secure exam. Download config if SEB
-                        not installed.
-                      </p>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
+                </div>
+                {/* Start Button */}
+                <div style={{ display: "flex", alignItems: "center", padding: "0 20px 0 0" }}>
+                  <button disabled={!canStart(exam.status)} onClick={() => navigate(`/exam/${exam.examBatchId}`)}
+                    style={{ background: "#1565C0", color: "#FFFFFF", border: "none", borderRadius: 6, padding: "10px 20px", fontSize: 13, fontWeight: 600, cursor: canStart(exam.status) ? "pointer" : "default", opacity: canStart(exam.status) ? 1 : 0.4, boxShadow: "0 1px 4px rgba(0,0,0,0.12)", whiteSpace: "nowrap" }}
+                    onMouseEnter={(e) => { if (canStart(exam.status)) (e.target as HTMLElement).style.background = "#0D47A1"; }}
+                    onMouseLeave={(e) => { if (canStart(exam.status)) (e.target as HTMLElement).style.background = "#1565C0"; }}
+                  >
+                    Start Exam →
+                  </button>
+                </div>
+              </div>
             ))}
           </div>
         )}

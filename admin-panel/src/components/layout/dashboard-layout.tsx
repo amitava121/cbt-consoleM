@@ -5,18 +5,16 @@ import {
   Building2,
   CheckCircle2,
   ChevronDown,
-  Command,
+  GraduationCap,
   Info,
   LayoutDashboard,
   LogOut,
   Monitor,
-  Moon,
   PanelLeft,
   PanelLeftClose,
   ScrollText,
   Settings,
   ShieldAlert,
-  Sun,
 
   Trophy,
   Users,
@@ -92,8 +90,6 @@ export default function DashboardLayout() {
   const logout = useAuthStore((s) => s.logout);
   const collapsed = useUIStore((s) => s.sidebarCollapsed);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
-  const theme = useUIStore((s) => s.theme);
-  const setTheme = useUIStore((s) => s.setTheme);
 
   const customBreadcrumbs = useUIStore((s) => s.customBreadcrumbs);
   const setCustomBreadcrumbs = useUIStore((s) => s.setCustomBreadcrumbs);
@@ -259,7 +255,7 @@ export default function DashboardLayout() {
         {/* Brand Logo Header */}
         <div className="flex h-16 items-center gap-3 border-b border-border/60 px-4 shrink-0">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 text-white shadow-md shadow-indigo-500/20">
-            <Command className="h-5 w-5" />
+            <GraduationCap className="h-5 w-5" />
           </div>
           {!collapsed && (
             <div className="flex flex-col">
@@ -437,33 +433,7 @@ export default function DashboardLayout() {
               </DropdownMenuContent>
             </DropdownMenu>
 
-            {/* Theme Toggle Button */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="icon" className="h-9 w-9 rounded-lg">
-                  {theme === "dark" ? (
-                    <Moon className="h-4 w-4 text-indigo-400" />
-                  ) : (
-                    <Sun className="h-4 w-4 text-amber-500" />
-                  )}
-                  <span className="sr-only">Toggle theme</span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => setTheme("light")}>
-                  <Sun className="mr-2 h-4 w-4 text-amber-500" />
-                  Light Mode
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setTheme("dark")}>
-                  <Moon className="mr-2 h-4 w-4 text-indigo-400" />
-                  Dark Mode
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setTheme("system")}>
-                  <Monitor className="mr-2 h-4 w-4 text-muted-foreground" />
-                  System Default
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {/* Theme Toggle Removed - Light mode only */}
 
             {/* User Profile Dropdown */}
             <DropdownMenu>

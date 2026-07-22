@@ -1,21 +1,11 @@
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { candidateService, type CandidateQuestion } from "@/services/candidate";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-    AlertCircle,
-    ArrowLeft,
-    ArrowRight,
-    CheckCircle2,
-    Clock,
-    Loader2,
-    Pause,
-    Send,
-} from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
+
+// ─── Utility Functions ───────────────────────────────────────────────────────
 
 function getQuestionText(content: unknown): string {
   if (!content || typeof content !== "object") return "";
@@ -46,6 +36,52 @@ function formatTime(secs: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+// ─── Calculator Logic ────────────────────────────────────────────────────────
+
+function useCalculator() {
+  const [display, setDisplay] = useState("0");
+  const [prev, setPrev] = useState<string | null>(null);
+  const [op, setOp] = useState<string | null>(null);
+  const [resetNext, setResetNext] = useState(false);
+
+  const press = (btn: string) => {
+    if (btn === "C") {
+      setDisplay("0"); setPrev(null); setOp(null); setResetNext(false);
+      return;
+    }
+    if (btn === "=") {
+      if (prev !== null && op) {
+        const a = parseFloat(prev);
+        const b = parseFloat(display);
+        let result = 0;
+        if (op === "+") result = a + b;
+        else if (op === "-") result = a - b;
+        else if (op === "×") result = a * b;
+        else if (op === "÷") result = b !== 0 ? a / b : 0;
+        setDisplay(String(parseFloat(result.toFixed(8))));
+        setPrev(null); setOp(null); setResetNext(true);
+      }
+      return;
+    }
+    if (["+", "-", "×", "÷"].includes(btn)) {
+      setPrev(display); setOp(btn); setResetNext(true);
+      return;
+    }
+    if (btn === ".") {
+      if (resetNext) { setDisplay("0."); setResetNext(false); return; }
+      if (!display.includes(".")) setDisplay(display + ".");
+      return;
+    }
+    // digit
+    if (resetNext) { setDisplay(btn); setResetNext(false); }
+    else { setDisplay(display === "0" ? btn : display + btn); }
+  };
+
+  return { display, press };
+}
+
+// ─── Main Exam Page Component ────────────────────────────────────────────────
+
 export default function CandidateExamPage() {
   const { id: batchId } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -53,6 +89,7 @@ export default function CandidateExamPage() {
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [markedForReview, setMarkedForReview] = useState<Set<string>>(new Set());
   const [remainingSecs, setRemainingSecs] = useState(0);
   const [examStarted, setExamStarted] = useState(false);
   const [attemptId, setAttemptId] = useState<string | null>(null);
@@ -61,11 +98,12 @@ export default function CandidateExamPage() {
   const [resuming, setResuming] = useState(false);
   const [forceLogout, setForceLogout] = useState(false);
   const [serverPaused, setServerPaused] = useState(false);
+  const [showSubmitDialog, setShowSubmitDialog] = useState(false);
 
-  // Persist attemptId to localStorage so it survives page refresh / reconnect
   const storageKey = batchId ? `exam_attempt_${batchId}` : null;
+  const calculator = useCalculator();
 
-  // On mount: check for existing attempt in localStorage and resume it
+  // On mount: check for existing attempt in localStorage and resume
   useEffect(() => {
     if (!storageKey) return;
     const savedAttemptId = localStorage.getItem(storageKey);
@@ -75,19 +113,14 @@ export default function CandidateExamPage() {
         .getAttemptState(savedAttemptId)
         .then((state) => {
           if (state.status === "in_progress" || state.status === "paused") {
-            // Restore answers from server
             const restoredAnswers: Record<string, string> = {};
             for (const [qId, ans] of Object.entries(state.answers)) {
-              const answerData = ans.answerData as Record<
-                string,
-                unknown
-              > | null;
+              const ansObj = ans as any;
+              const answerData = ansObj.answerData as Record<string, unknown> | null;
               if (answerData && typeof answerData === "object") {
-                // Extract selected option ID or value for display
                 const selected =
                   (answerData as Record<string, unknown>).selectedOptionId ??
-                  (answerData as Record<string, unknown>).value ??
-                  "";
+                  (answerData as Record<string, unknown>).value ?? "";
                 if (typeof selected === "string" && selected) {
                   restoredAnswers[qId] = selected;
                 }
@@ -99,12 +132,10 @@ export default function CandidateExamPage() {
             setExamStarted(true);
             toast.info("Exam resumed from previous session.");
           } else {
-            // Attempt is finished/terminated — clear localStorage
             localStorage.removeItem(storageKey);
           }
         })
         .catch(() => {
-          // Attempt state fetch failed — clear stale data
           localStorage.removeItem(storageKey);
         })
         .finally(() => setResuming(false));
@@ -129,26 +160,19 @@ export default function CandidateExamPage() {
       setAttemptId(data.attemptId);
       setRemainingSecs(data.remainingTimeSeconds);
       setExamStarted(true);
-      // Persist attemptId for reconnection recovery
-      if (storageKey) {
-        localStorage.setItem(storageKey, data.attemptId);
-      }
-      // If this is a resume (status in_progress), fetch saved answers
+      if (storageKey) localStorage.setItem(storageKey, data.attemptId);
       if (data.status === "in_progress" || data.status === "paused") {
         candidateService
           .getAttemptState(data.attemptId)
           .then((state) => {
             const restoredAnswers: Record<string, string> = {};
             for (const [qId, ans] of Object.entries(state.answers)) {
-              const answerData = ans.answerData as Record<
-                string,
-                unknown
-              > | null;
+              const ansObj = ans as any;
+              const answerData = ansObj.answerData as Record<string, unknown> | null;
               if (answerData && typeof answerData === "object") {
                 const selected =
                   (answerData as Record<string, unknown>).selectedOptionId ??
-                  (answerData as Record<string, unknown>).value ??
-                  "";
+                  (answerData as Record<string, unknown>).value ?? "";
                 if (typeof selected === "string" && selected) {
                   restoredAnswers[qId] = selected;
                 }
@@ -158,44 +182,43 @@ export default function CandidateExamPage() {
             setRemainingSecs(state.remainingTimeSecs);
             toast.info("Exam resumed — answers restored.");
           })
-          .catch(() => {
-            toast.success("Exam started. Good luck!");
-          });
+          .catch(() => { toast.success("Exam started. Good luck!"); });
       } else {
         toast.success("Exam started. Good luck!");
       }
     },
     onError: (err: any) => {
       const errData = err.response?.data?.error;
-      const msg =
-        typeof errData === "string"
-          ? errData
-          : (errData?.message ?? "Failed to start exam");
+      const msg = typeof errData === "string" ? errData : (errData?.message ?? "Failed to start exam");
       toast.error(msg);
     },
   });
 
   const saveAnswerMutation = useMutation({
-    mutationFn: ({
-      questionId,
-      answerData,
-    }: {
-      questionId: string;
-      answerData: Record<string, unknown>;
-    }) => candidateService.saveAnswer(attemptId!, questionId, answerData),
-    onError: () => {
-      // Silent — answers are auto-saved
-    },
+    mutationFn: ({ questionId, answerData }: { questionId: string; answerData: Record<string, unknown> }) =>
+      candidateService.saveAnswer(attemptId!, questionId, answerData),
+    onError: () => {},
   });
 
-  const handleAnswerSelect = (
-    questionId: string,
-    answerData: Record<string, unknown>,
-    displayValue: string,
-  ) => {
+  const handleAnswerSelect = (questionId: string, answerData: Record<string, unknown>, displayValue: string) => {
     setAnswers((prev) => {
       const next = { ...prev, [questionId]: displayValue };
       saveAnswerMutation.mutate({ questionId, answerData });
+      return next;
+    });
+  };
+
+  const handleClearAnswer = () => {
+    if (!currentQuestion) return;
+    setAnswers((prev) => { const next = { ...prev }; delete next[currentQuestion.id]; return next; });
+  };
+
+  const handleMarkForReview = () => {
+    if (!currentQuestion) return;
+    setMarkedForReview((prev) => {
+      const next = new Set(prev);
+      if (next.has(currentQuestion.id)) next.delete(currentQuestion.id);
+      else next.add(currentQuestion.id);
       return next;
     });
   };
@@ -205,20 +228,17 @@ export default function CandidateExamPage() {
     setSubmitting(true);
     try {
       await candidateService.submitExam(attemptId);
-      // Clear persisted attempt on successful submit
       if (storageKey) localStorage.removeItem(storageKey);
       toast.success("Exam submitted successfully!");
       queryClient.invalidateQueries({ queryKey: ["candidate-exams"] });
       navigate("/exams");
     } catch (err: any) {
       const errData = err.response?.data?.error;
-      const msg =
-        typeof errData === "string"
-          ? errData
-          : (errData?.message ?? "Submit failed");
+      const msg = typeof errData === "string" ? errData : (errData?.message ?? "Submit failed");
       toast.error(msg);
     } finally {
       setSubmitting(false);
+      setShowSubmitDialog(false);
     }
   };
 
@@ -227,60 +247,33 @@ export default function CandidateExamPage() {
     if (!examStarted || remainingSecs <= 0) return;
     const timer = setInterval(() => {
       setRemainingSecs((s) => {
-        if (s <= 1) {
-          clearInterval(timer);
-          handleSubmit();
-          return 0;
-        }
+        if (s <= 1) { clearInterval(timer); handleSubmit(); return 0; }
         return s - 1;
       });
     }, 1000);
     return () => clearInterval(timer);
   }, [examStarted, remainingSecs <= 0]);
 
-  // Violation detection: tab switch and window blur
+  // Violation detection
   useEffect(() => {
     if (!examStarted || !attemptId) return;
-
     const handleVisibilityChange = () => {
       if (document.hidden) {
-        candidateService
-          .reportViolation(attemptId, {
-            violationType: "tab_switch",
-            severity: "high",
-            description: "Candidate switched away from the exam tab",
-          })
-          .catch(() => {});
+        candidateService.reportViolation(attemptId, { violationType: "tab_switch", severity: "high", description: "Candidate switched away from the exam tab" }).catch(() => {});
         toast.warning("Tab switch detected! This has been reported.");
       }
     };
-
     const handleBlur = () => {
-      candidateService
-        .reportViolation(attemptId, {
-          violationType: "window_blur",
-          severity: "medium",
-          description: "Exam window lost focus",
-        })
-        .catch(() => {});
+      candidateService.reportViolation(attemptId, { violationType: "window_blur", severity: "medium", description: "Exam window lost focus" }).catch(() => {});
       toast.warning("Window focus lost! This has been reported.");
     };
-
     const handleContextMenu = (e: MouseEvent) => {
       e.preventDefault();
-      candidateService
-        .reportViolation(attemptId, {
-          violationType: "process_violation",
-          severity: "low",
-          description: "Right-click context menu blocked",
-        })
-        .catch(() => {});
+      candidateService.reportViolation(attemptId, { violationType: "process_violation", severity: "low", description: "Right-click context menu blocked" }).catch(() => {});
     };
-
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("blur", handleBlur);
     document.addEventListener("contextmenu", handleContextMenu);
-
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("blur", handleBlur);
@@ -288,57 +281,29 @@ export default function CandidateExamPage() {
     };
   }, [examStarted, attemptId]);
 
-  // Heartbeat: send every 30s to refresh Redis session lock and active key
+  // Heartbeat
   useEffect(() => {
     if (!examStarted || !attemptId || forceLogout) return;
-
     const sendHeartbeat = async () => {
       try {
         const fp = localStorage.getItem("candidateDeviceFp") ?? undefined;
         const res: any = await candidateService.heartbeat(fp);
-        if (res?.terminated) {
-          setForceLogout(true);
-          toast.error("Exam has been stopped by the administrator.");
-          return;
-        }
-        if (res?.autoResumed) {
-          setServerPaused(false);
-          toast.success("Connection restored. Exam resumed.");
-          if (res.remainingTimeSecs != null) {
-            setRemainingSecs(res.remainingTimeSecs);
-          }
-        } else if (res?.paused) {
-          setServerPaused(true);
-        } else {
-          setServerPaused(false);
-        }
+        if (res?.terminated) { setForceLogout(true); toast.error("Exam has been stopped by the administrator."); return; }
+        if (res?.autoResumed) { setServerPaused(false); toast.success("Connection restored."); if (res.remainingTimeSecs != null) setRemainingSecs(res.remainingTimeSecs); }
+        else if (res?.paused) { setServerPaused(true); }
+        else { setServerPaused(false); }
       } catch (err: any) {
         const status = err.response?.status;
-        if (status === 401) {
-          const msg = err.response?.data?.error ?? "";
-          if (msg.includes("another login") || msg.includes("taken over")) {
-            setForceLogout(true);
-            toast.error("Your session was taken over by another login.");
-          } else if (msg.includes("Device changed")) {
-            setForceLogout(true);
-            toast.error("Device change detected. Session terminated.");
-          } else {
-            setForceLogout(true);
-            toast.error("Session expired. Please login again.");
-          }
-        } else {
-          // Network error — server may be temporarily unreachable
-          setServerPaused(true);
-        }
+        if (status === 401) { setForceLogout(true); toast.error("Session expired. Please login again."); }
+        else { setServerPaused(true); }
       }
     };
-
     sendHeartbeat();
     const interval = setInterval(sendHeartbeat, 10_000);
     return () => clearInterval(interval);
   }, [examStarted, attemptId, forceLogout]);
 
-  // Force logout handler
+  // Force logout
   useEffect(() => {
     if (!forceLogout) return;
     localStorage.removeItem("candidateAccessToken");
@@ -349,461 +314,575 @@ export default function CandidateExamPage() {
     return () => clearTimeout(timer);
   }, [forceLogout, navigate, storageKey]);
 
-  // Group questions by section
+  // Section management
   const sections = useMemo(() => {
     if (!questions || !examMeta?.sections) return [];
-    return examMeta.sections.map((s) => ({
-      ...s,
-      questions: questions.filter((q) => q.sectionId === s.id),
-    }));
+    return examMeta.sections.map((s: any) => ({ ...s, questions: questions.filter((q: any) => q.sectionId === s.id) }));
   }, [questions, examMeta]);
 
-  // Set active section to first section when questions load
   useEffect(() => {
-    if (!activeSectionId && sections.length > 0) {
-      setActiveSectionId(sections[0].id);
-      setCurrentIndex(0);
-    }
+    if (!activeSectionId && sections.length > 0) { setActiveSectionId(sections[0].id); setCurrentIndex(0); }
   }, [sections, activeSectionId]);
 
-  // Questions in the active section
   const activeSectionQuestions = useMemo(() => {
     if (!activeSectionId || !questions) return [];
-    return questions.filter((q) => q.sectionId === activeSectionId);
+    return questions.filter((q: any) => q.sectionId === activeSectionId);
   }, [activeSectionId, questions]);
 
-  const activeSection = sections.find((s) => s.id === activeSectionId);
-
+  const activeSection = sections.find((s: any) => s.id === activeSectionId);
   const answeredCount = useMemo(() => Object.keys(answers).length, [answers]);
+  const unansweredCount = (questions?.length ?? 0) - answeredCount;
   const totalQuestions = questions?.length ?? 0;
   const currentQuestion = activeSectionQuestions[currentIndex];
-  const isLastQuestion =
-    currentIndex === activeSectionQuestions.length - 1 &&
-    sections.findIndex((s) => s.id === activeSectionId) === sections.length - 1;
+  const markedCount = markedForReview.size;
 
-  // Navigate to next section
-  const goToNextSection = () => {
-    const currentIdx = sections.findIndex((s) => s.id === activeSectionId);
-    if (currentIdx < sections.length - 1) {
-      setActiveSectionId(sections[currentIdx + 1].id);
-      setCurrentIndex(0);
+  const isFirstQuestion = currentIndex === 0 && sections.findIndex((s: any) => s.id === activeSectionId) === 0;
+  const isLastQuestion = currentIndex === activeSectionQuestions.length - 1 && sections.findIndex((s: any) => s.id === activeSectionId) === sections.length - 1;
+
+  const handleNext = () => {
+    if (currentIndex < activeSectionQuestions.length - 1) setCurrentIndex((i) => i + 1);
+    else {
+      const idx = sections.findIndex((s: any) => s.id === activeSectionId);
+      if (idx < sections.length - 1) { setActiveSectionId(sections[idx + 1].id); setCurrentIndex(0); }
+    }
+  };
+  const handlePrev = () => {
+    if (currentIndex > 0) setCurrentIndex((i) => i - 1);
+    else {
+      const idx = sections.findIndex((s: any) => s.id === activeSectionId);
+      if (idx > 0) { setActiveSectionId(sections[idx - 1].id); setCurrentIndex(sections[idx - 1].questions.length - 1); }
     }
   };
 
-  // Navigate to previous section
-  const goToPrevSection = () => {
-    const currentIdx = sections.findIndex((s) => s.id === activeSectionId);
-    if (currentIdx > 0) {
-      setActiveSectionId(sections[currentIdx - 1].id);
-      setCurrentIndex(sections[currentIdx - 1].questions.length - 1);
-    }
-  };
+  // ═══ OVERLAYS ═══
 
-  // Force logout overlay
   if (forceLogout) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-red-50 to-red-100 p-4">
-        <Card className="w-full max-w-md shadow-xl">
-          <CardContent className="flex flex-col items-center gap-4 p-8">
-            <AlertCircle className="h-12 w-12 text-red-600" />
-            <p className="text-lg font-bold text-red-700">Session Terminated</p>
-            <p className="text-sm text-muted-foreground">
-              You are being redirected to the login page...
-            </p>
-          </CardContent>
-        </Card>
+      <div style={{ display: "flex", minHeight: "100vh", alignItems: "center", justifyContent: "center", background: "#F5F5F5" }}>
+        <div style={{ width: 400, textAlign: "center" }}>
+          <span style={{ fontSize: 64, color: "#E53935" }}>⚠</span>
+          <h2 style={{ fontSize: 24, fontWeight: 700, color: "#212121", marginTop: 20 }}>
+            Session Terminated
+          </h2>
+          <p style={{ fontSize: 14, color: "#757575", marginTop: 15 }}>
+            You are being redirected to the login page...
+          </p>
+        </div>
       </div>
     );
   }
 
-  // Server paused overlay (network issue or auto-pause detected)
   if (serverPaused && examStarted) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-amber-50 to-amber-100 p-4">
-        <Card className="w-full max-w-md shadow-xl">
-          <CardContent className="flex flex-col items-center gap-4 p-8">
-            <Pause className="h-12 w-12 text-amber-600" />
-            <p className="text-lg font-bold text-amber-700">Exam Paused</p>
-            <p className="text-sm text-muted-foreground">
-              Connection to server lost. Your timer is paused. Reconnecting...
-            </p>
-            <Loader2 className="h-6 w-6 animate-spin text-amber-600" />
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  // Pre-exam instructions screen
-  if (!examStarted) {
-    if (resuming) {
-      return (
-        <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-          <Card className="w-full max-w-md shadow-xl">
-            <CardContent className="flex flex-col items-center gap-4 p-8">
-              <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-              <p className="text-lg font-medium">
-                Restoring your exam session...
-              </p>
-              <p className="text-sm text-muted-foreground">
-                Reconnecting to server and restoring your answers.
-              </p>
-            </CardContent>
-          </Card>
+      <div style={{ display: "flex", minHeight: "100vh", alignItems: "center", justifyContent: "center", background: "#F5F5F5" }}>
+        <div style={{ width: 400, textAlign: "center" }}>
+          <span style={{ fontSize: 48, color: "#FFA726" }}>⚠</span>
+          <h2 style={{ fontSize: 24, fontWeight: 700, color: "#212121", marginTop: 20 }}>
+            Exam Paused
+          </h2>
+          <p style={{ fontSize: 14, color: "#757575", marginTop: 10 }}>
+            Connection to server lost. Your timer is paused. Reconnecting...
+          </p>
+          <Loader2 className="mx-auto mt-4 h-6 w-6 animate-spin" style={{ color: "#1565C0" }} />
         </div>
-      );
-    }
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-        <Card className="w-full max-w-2xl shadow-xl">
-          <CardContent className="p-8">
-            <h1 className="mb-2 text-2xl font-bold">
-              {examMeta?.examName ?? "Exam"}
-            </h1>
-
-            <div className="mb-6 grid grid-cols-2 gap-4">
-              <div className="rounded-lg bg-blue-50 p-4">
-                <Clock className="mb-1 h-5 w-5 text-blue-600" />
-                <p className="text-2xl font-bold">
-                  {examMeta?.durationMinutes ?? "—"} min
-                </p>
-                <p className="text-xs text-muted-foreground">Duration</p>
-              </div>
-              <div className="rounded-lg bg-indigo-50 p-4">
-                <CheckCircle2 className="mb-1 h-5 w-5 text-indigo-600" />
-                <p className="text-2xl font-bold">{totalQuestions || "—"}</p>
-                <p className="text-xs text-muted-foreground">Questions</p>
-              </div>
-            </div>
-
-            {/* Section summary */}
-            {sections.length > 0 && (
-              <div className="mb-6 rounded-lg border p-4">
-                <h3 className="mb-2 font-semibold">Sections</h3>
-                <div className="space-y-1">
-                  {sections.map((s, i) => (
-                    <div
-                      key={s.id}
-                      className="flex items-center justify-between text-sm"
-                    >
-                      <span>
-                        {i + 1}. {s.name}
-                      </span>
-                      <span className="text-muted-foreground">
-                        {s.questions.length} questions
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {examMeta?.instructions && (
-              <div className="mb-6 rounded-lg border p-4">
-                <h3 className="mb-2 font-semibold">Instructions</h3>
-                <p className="whitespace-pre-wrap text-sm text-muted-foreground">
-                  {examMeta.instructions}
-                </p>
-              </div>
-            )}
-
-            <div className="mb-6 flex items-start gap-2 rounded-lg bg-amber-50 p-4">
-              <AlertCircle className="mt-0.5 h-5 w-5 text-amber-600" />
-              <p className="text-sm text-amber-800">
-                Once you start, the timer cannot be paused. Your answers are
-                auto-saved. Do not close or refresh the browser.
-              </p>
-            </div>
-
-            <Button
-              className="w-full"
-              size="lg"
-              onClick={() => startExamMutation.mutate()}
-              disabled={startExamMutation.isPending || questionsLoading}
-            >
-              {startExamMutation.isPending ? (
-                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-              ) : null}
-              {startExamMutation.isPending ? "Starting..." : "Start Exam"}
-            </Button>
-          </CardContent>
-        </Card>
       </div>
     );
   }
 
+  if (!examStarted && resuming) {
+    return (
+      <div style={{ display: "flex", minHeight: "100vh", alignItems: "center", justifyContent: "center", background: "#F5F5F5" }}>
+        <div style={{ width: 400, textAlign: "center" }}>
+          <Loader2 className="mx-auto h-8 w-8 animate-spin" style={{ color: "#1565C0" }} />
+          <h2 style={{ fontSize: 18, fontWeight: 500, color: "#212121", marginTop: 16 }}>
+            Restoring your exam session...
+          </h2>
+          <p style={{ fontSize: 14, color: "#757575", marginTop: 8 }}>
+            Reconnecting to server and restoring your answers.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // ═══ PRE-EXAM INSTRUCTIONS ═══
+  if (!examStarted) {
+    return (
+      <div style={{ display: "flex", minHeight: "100vh", alignItems: "center", justifyContent: "center", background: "#F5F5F5", padding: 24 }}>
+        <div style={{ width: "100%", maxWidth: 600, background: "#FFFFFF", borderRadius: 8, border: "1px solid #E0E0E0", padding: 32, boxShadow: "0 1px 8px rgba(0,0,0,0.06)" }}>
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: "#212121", marginBottom: 20 }}>
+            {examMeta?.examName ?? "Exam"}
+          </h1>
+
+          {/* Info grid */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+            <div style={{ background: "#E3F2FD", borderRadius: 6, padding: 16 }}>
+              <p style={{ fontSize: 24, fontWeight: 700, color: "#212121" }}>{examMeta?.durationMinutes ?? "—"} min</p>
+              <p style={{ fontSize: 12, color: "#757575" }}>Duration</p>
+            </div>
+            <div style={{ background: "#E8F5E9", borderRadius: 6, padding: 16 }}>
+              <p style={{ fontSize: 24, fontWeight: 700, color: "#212121" }}>{totalQuestions || "—"}</p>
+              <p style={{ fontSize: 12, color: "#757575" }}>Questions</p>
+            </div>
+          </div>
+
+          {/* Sections */}
+          {sections.length > 0 && (
+            <div style={{ border: "1px solid #E0E0E0", borderRadius: 6, padding: 16, marginBottom: 20 }}>
+              <h3 style={{ fontSize: 14, fontWeight: 600, color: "#212121", marginBottom: 8 }}>Sections</h3>
+              {sections.map((s: any, i: number) => (
+                <div key={s.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 0" }}>
+                  <span style={{ color: "#212121" }}>{i + 1}. {s.name}</span>
+                  <span style={{ color: "#757575" }}>{s.questions.length} questions</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {examMeta?.instructions && (
+            <div style={{ border: "1px solid #E0E0E0", borderRadius: 6, padding: 16, marginBottom: 20 }}>
+              <h3 style={{ fontSize: 14, fontWeight: 600, color: "#212121", marginBottom: 8 }}>Instructions</h3>
+              <p style={{ fontSize: 13, color: "#757575", whiteSpace: "pre-wrap" }}>{typeof examMeta.instructions === "string" ? examMeta.instructions : (examMeta.instructions as any)?.text ?? ""}</p>
+            </div>
+          )}
+
+          {/* Warning */}
+          <div style={{ background: "#FFF8E1", borderRadius: 6, padding: "12px 16px", marginBottom: 20 }}>
+            <p style={{ fontSize: 13, color: "#E65100" }}>
+              ⚠ Once you start, the timer cannot be paused. Your answers are auto-saved. Do not close or refresh the browser.
+            </p>
+          </div>
+
+          <button
+            onClick={() => startExamMutation.mutate()}
+            disabled={startExamMutation.isPending || questionsLoading}
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100%", height: 44, background: "#1565C0", color: "#FFFFFF", border: "none", borderRadius: 6, fontSize: 16, fontWeight: 600, cursor: "pointer", opacity: startExamMutation.isPending ? 0.7 : 1 }}
+          >
+            {startExamMutation.isPending && <Loader2 className="mr-2 h-5 w-5 animate-spin" />}
+            {startExamMutation.isPending ? "Starting..." : "Start Exam"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ═══ LOADING ═══
   if (questionsLoading || !questions) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+      <div style={{ display: "flex", minHeight: "100vh", alignItems: "center", justifyContent: "center", background: "#F5F5F5" }}>
+        <Loader2 className="h-8 w-8 animate-spin" style={{ color: "#1565C0" }} />
       </div>
     );
   }
 
+  // ═══ MAIN EXAM INTERFACE ═══
+  // Layout: Row 0 = Header (spans both cols), Row 1 = Question + Sidebar, Row 2 = Footer (left col only)
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header bar */}
-      <div className="sticky top-0 z-10 border-b bg-white shadow-sm">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
-          <div>
-            <h1 className="font-semibold">{examMeta?.examName}</h1>
-            <p className="text-xs text-muted-foreground">
-              {answeredCount} / {totalQuestions} answered
-            </p>
+    <div style={{ display: "grid", gridTemplateRows: "auto 1fr auto", gridTemplateColumns: "1fr 290px", height: "100vh", overflow: "hidden", background: "#F5F5F5" }}>
+
+      {/* ═══ ROW 0: HEADER - Blue bar spanning both columns ═══ */}
+      <div style={{ gridColumn: "1 / -1", background: "#1565C0", padding: "10px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        {/* Left: Logo + Exam Title + Candidate/Section info */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {/* Logo placeholder 28x28 */}
+          <div style={{ width: 28, height: 28, borderRadius: 4, background: "#0D47A1", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span style={{ color: "#FFFFFF", fontSize: 14, fontWeight: 700 }}>E</span>
           </div>
-          <div className="flex items-center gap-4">
-            <div
-              className={`flex items-center gap-2 rounded-lg px-3 py-1.5 font-mono font-bold ${
-                remainingSecs < 60
-                  ? "bg-red-100 text-red-700"
-                  : "bg-blue-100 text-blue-700"
-              }`}
-            >
-              <Clock className="h-4 w-4" />
+          <div>
+            <span style={{ fontSize: 15, fontWeight: 600, color: "#FFFFFF" }}>
+              {examMeta?.examName ?? "Exam"}
+            </span>
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.7)", marginLeft: 12 }}>
+              {examMeta?.candidateName ?? ""}{activeSection ? ` | ${activeSection.name}` : ""}
+            </span>
+          </div>
+        </div>
+
+        {/* Right: Connection dot + Timer */}
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          {/* Connection status */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#4CAF50" }} />
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.7)" }}>Online</span>
+          </div>
+          {/* Timer box */}
+          <div style={{ background: "#FFF8E1", borderRadius: 6, padding: "6px 12px" }}>
+            <span style={{ fontSize: 17, fontWeight: 700, fontFamily: "Consolas, monospace", color: "#E65100" }}>
               {formatTime(remainingSecs)}
-            </div>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={handleSubmit}
-              disabled={submitting}
-            >
-              {submitting ? (
-                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-              ) : (
-                <Send className="mr-1 h-4 w-4" />
-              )}
-              Submit
-            </Button>
+            </span>
           </div>
         </div>
       </div>
 
-      {/* Section tabs */}
-      {sections.length > 1 && (
-        <div className="sticky top-[57px] z-[5] border-b bg-white">
-          <div className="mx-auto flex max-w-5xl gap-1 overflow-x-auto px-4 py-2">
-            {sections.map((s) => {
-              const sectionAnswered = s.questions.filter((q) =>
-                answers[q.id] ? true : false,
-              ).length;
+      {/* ═══ ROW 1, COL 1: QUESTION CONTENT (left area, scrollable) ═══ */}
+      <div style={{ overflow: "auto", padding: "24px 20px 20px 12px", paddingLeft: 24 }}>
+        {/* Question number badge + Marks badge */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <span style={{ background: "#E3F2FD", borderRadius: 4, padding: "5px 10px", fontSize: 12, fontWeight: 600, color: "#1565C0" }}>
+            Question {currentIndex + 1} of {activeSectionQuestions.length}
+          </span>
+          <span style={{ background: "#F5F5F5", borderRadius: 4, padding: "5px 10px", fontSize: 12, color: "#757575" }}>
+            Marks: +1 / -0
+          </span>
+        </div>
+
+        {/* Question text */}
+        <p style={{ fontSize: 16, lineHeight: "26px", color: "#212121", marginBottom: 24, whiteSpace: "pre-wrap" }}>
+          {getQuestionText(currentQuestion?.content)}
+        </p>
+
+        {/* MCQ Options */}
+        {currentQuestion && getOptions(currentQuestion).length > 0 && (
+          <div>
+            {getOptions(currentQuestion).map((opt) => {
+              const isSelected = answers[currentQuestion.id] === opt.id;
               return (
-                <button
-                  key={s.id}
-                  onClick={() => {
-                    setActiveSectionId(s.id);
-                    setCurrentIndex(0);
+                <div
+                  key={opt.id}
+                  onClick={() => handleAnswerSelect(currentQuestion.id, { selectedOptionId: opt.id }, opt.id)}
+                  style={{
+                    margin: "4px 0",
+                    borderRadius: 6,
+                    border: isSelected ? "1.5px solid #1565C0" : "1px solid #E0E0E0",
+                    background: isSelected ? "#E3F2FD" : "#FFFFFF",
+                    cursor: "pointer",
+                    transition: "all 0.15s",
                   }}
-                  className={`whitespace-nowrap rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
-                    activeSectionId === s.id
-                      ? "bg-blue-600 text-white"
-                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                  }`}
                 >
-                  {s.name} ({sectionAnswered}/{s.questions.length})
-                </button>
+                  <label style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 12px", cursor: "pointer" }}>
+                    <input
+                      type="radio"
+                      name={`q-${currentQuestion.id}`}
+                      checked={isSelected}
+                      onChange={() => handleAnswerSelect(currentQuestion.id, { selectedOptionId: opt.id }, opt.id)}
+                      style={{ width: 16, height: 16, accentColor: "#1565C0" }}
+                    />
+                    <span style={{ fontSize: 15, color: "#212121" }}>{opt.label}</span>
+                  </label>
+                </div>
               );
             })}
           </div>
-        </div>
-      )}
+        )}
 
-      <div className="mx-auto max-w-5xl px-4 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_200px] gap-6">
-          {/* Main question area */}
-          <Card className="shadow-md">
-            <CardContent className="p-6">
-              <div className="mb-4 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Badge variant="info">
-                    Q{currentIndex + 1} of {activeSectionQuestions.length}
-                  </Badge>
-                  {activeSection && (
-                    <span className="text-sm text-muted-foreground">
-                      {activeSection.name}
-                    </span>
-                  )}
-                </div>
-                <Badge variant="secondary">
-                  {answeredCount} / {totalQuestions} answered
-                </Badge>
-              </div>
+        {/* Free text input */}
+        {currentQuestion && getOptions(currentQuestion).length === 0 && (
+          <div>
+            <p style={{ fontSize: 14, color: "#757575", marginBottom: 8 }}>Your Answer:</p>
+            <textarea
+              rows={6}
+              placeholder="Type your answer here..."
+              value={answers[currentQuestion.id] ?? ""}
+              onChange={(e) => handleAnswerSelect(currentQuestion.id, { textInput: e.target.value }, e.target.value)}
+              style={{ width: "100%", fontSize: 15, padding: 12, border: "1px solid #E0E0E0", borderRadius: 6, outline: "none", resize: "vertical", boxSizing: "border-box" }}
+            />
+          </div>
+        )}
+      </div>
 
-              <p className="mb-6 text-lg leading-relaxed">
-                {getQuestionText(currentQuestion?.content)}
-              </p>
+      {/* ═══ ROW 1, COL 2: RIGHT SIDEBAR (290px) ═══ */}
+      <div style={{ background: "#FAFAFA", borderLeft: "1px solid #E0E0E0", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        {/* Scrollable content area */}
+        <div style={{ flex: 1, overflow: "auto", margin: 16 }}>
 
-              {/* Answer options */}
-              {currentQuestion && (
-                <div className="space-y-3">
-                  {getOptions(currentQuestion).map((opt) => (
-                    <label
-                      key={opt.id}
-                      className={`flex cursor-pointer items-center gap-3 rounded-lg border-2 p-3 transition-colors ${
-                        answers[currentQuestion.id] === opt.id
-                          ? "border-blue-500 bg-blue-50"
-                          : "border-gray-200 hover:border-gray-300"
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name={`q-${currentQuestion.id}`}
-                        checked={answers[currentQuestion.id] === opt.id}
-                        onChange={() =>
-                          handleAnswerSelect(
-                            currentQuestion.id,
-                            { selectedOptionId: opt.id },
-                            opt.id,
-                          )
-                        }
-                        className="h-4 w-4 accent-blue-600"
-                      />
-                      <span className="text-sm">{opt.label}</span>
-                    </label>
-                  ))}
+          {/* 1. Question Palette */}
+          <div style={{ marginBottom: 16 }}>
+            <h4 style={{ fontSize: 13, fontWeight: 600, color: "#212121", marginBottom: 8 }}>Question Palette</h4>
+            <div style={{ background: "#FFFFFF", border: "1px solid #E0E0E0", borderRadius: 8, padding: 10, maxHeight: 160, overflow: "auto" }}>
+              <div style={{ display: "flex", flexWrap: "wrap" }}>
+                {activeSectionQuestions.map((q: CandidateQuestion, i: number) => {
+                  const isActive = i === currentIndex;
+                  const isAnswered = !!answers[q.id];
+                  const isMarked = markedForReview.has(q.id);
 
-                  {/* Free text for non-MCQ */}
-                  {getOptions(currentQuestion).length === 0 && (
-                    <textarea
-                      className="w-full rounded-lg border-2 border-gray-200 p-3 text-sm focus:border-blue-500 focus:outline-none"
-                      rows={6}
-                      placeholder="Type your answer here..."
-                      value={answers[currentQuestion.id] ?? ""}
-                      onChange={(e) =>
-                        handleAnswerSelect(
-                          currentQuestion.id,
-                          { textInput: e.target.value },
-                          e.target.value,
-                        )
-                      }
-                    />
-                  )}
-                </div>
-              )}
+                  let bg = "#EF5350"; // Not answered (red)
+                  if (isActive) bg = "#1976D2"; // Current (blue)
+                  else if (isMarked) bg = "#FFA726"; // Marked (orange)
+                  else if (isAnswered) bg = "#66BB6A"; // Answered (green)
 
-              {/* Navigation */}
-              <div className="mt-6 flex items-center justify-between">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    if (currentIndex === 0) {
-                      goToPrevSection();
-                    } else {
-                      setCurrentIndex((i) => Math.max(0, i - 1));
-                    }
-                  }}
-                  disabled={
-                    currentIndex === 0 &&
-                    sections.findIndex((s) => s.id === activeSectionId) === 0
-                  }
-                >
-                  <ArrowLeft className="mr-1 h-4 w-4" />
-                  Previous
-                </Button>
-                {isLastQuestion ? (
-                  <Button
-                    variant="destructive"
-                    onClick={handleSubmit}
-                    disabled={submitting}
-                  >
-                    {submitting ? (
-                      <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Send className="mr-1 h-4 w-4" />
-                    )}
-                    Submit Exam
-                  </Button>
-                ) : (
-                  <Button
-                    onClick={() => {
-                      if (currentIndex === activeSectionQuestions.length - 1) {
-                        goToNextSection();
-                      } else {
-                        setCurrentIndex((i) =>
-                          Math.min(activeSectionQuestions.length - 1, i + 1),
-                        );
-                      }
-                    }}
-                  >
-                    Next
-                    <ArrowRight className="ml-1 h-4 w-4" />
-                  </Button>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Question palette */}
-          <Card className="h-fit shadow-md">
-            <CardContent className="p-4">
-              <h3 className="mb-3 text-sm font-semibold">
-                {activeSection ? activeSection.name : "Questions"}
-              </h3>
-              <div className="grid grid-cols-5 gap-2 lg:grid-cols-4">
-                {activeSectionQuestions.map(
-                  (q: CandidateQuestion, i: number) => (
+                  return (
                     <button
                       key={q.id}
                       onClick={() => setCurrentIndex(i)}
-                      className={`flex h-8 w-8 items-center justify-center rounded text-xs font-medium transition-colors ${
-                        i === currentIndex
-                          ? "bg-blue-600 text-white"
-                          : answers[q.id]
-                            ? "bg-green-100 text-green-700 hover:bg-green-200"
-                            : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                      }`}
+                      style={{
+                        width: 36, height: 36, margin: 2,
+                        border: "none", borderRadius: 6,
+                        fontSize: 12, fontWeight: 700,
+                        background: bg, color: "#FFFFFF",
+                        cursor: "pointer",
+                      }}
                     >
                       {i + 1}
                     </button>
-                  ),
-                )}
+                  );
+                })}
               </div>
-              {sections.length > 1 && (
-                <div className="mt-4 space-y-1">
-                  <p className="text-xs font-medium text-muted-foreground">
-                    All Sections
-                  </p>
-                  {sections.map((s) => {
-                    const sectionAnswered = s.questions.filter((q) =>
-                      answers[q.id] ? true : false,
-                    ).length;
-                    return (
-                      <button
-                        key={s.id}
-                        onClick={() => {
-                          setActiveSectionId(s.id);
-                          setCurrentIndex(0);
-                        }}
-                        className={`flex w-full items-center justify-between rounded px-2 py-1 text-xs transition-colors ${
-                          activeSectionId === s.id
-                            ? "bg-blue-50 text-blue-700"
-                            : "hover:bg-gray-50"
-                        }`}
-                      >
-                        <span>{s.name}</span>
-                        <span className="text-muted-foreground">
-                          {sectionAnswered}/{s.questions.length}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-              <div className="mt-4 space-y-1.5 text-xs text-muted-foreground">
-                <div className="flex items-center gap-2">
-                  <div className="h-3 w-3 rounded bg-green-100" /> Answered
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="h-3 w-3 rounded bg-gray-100" /> Not answered
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="h-3 w-3 rounded bg-blue-600" /> Current
-                </div>
+            </div>
+          </div>
+
+          {/* 2. Exam Summary */}
+          <div style={{ marginBottom: 16 }}>
+            <h4 style={{ fontSize: 13, fontWeight: 600, color: "#212121", marginBottom: 8 }}>Exam Summary</h4>
+            <div style={{ background: "#FFFFFF", border: "1px solid #E0E0E0", borderRadius: 8, padding: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#66BB6A" }} />
+                <span style={{ fontSize: 12, color: "#212121" }}>Answered: {answeredCount}</span>
               </div>
-            </CardContent>
-          </Card>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#EF5350" }} />
+                <span style={{ fontSize: 12, color: "#212121" }}>Not Answered: {unansweredCount}</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#FFA726" }} />
+                <span style={{ fontSize: 12, color: "#212121" }}>Marked: {markedCount}</span>
+              </div>
+              <div style={{ borderTop: "1px solid #E0E0E0", margin: "8px 0" }} />
+              <div style={{ fontSize: 12, color: "#212121", marginBottom: 4 }}>
+                Current Question: {currentIndex + 1}/{activeSectionQuestions.length}
+              </div>
+              <div style={{ fontSize: 12, color: "#E65100", marginBottom: 4 }}>
+                Time Remaining: {formatTime(remainingSecs)}
+              </div>
+              <div style={{ fontSize: 12, color: "#4CAF50" }}>
+                Connection: Online
+              </div>
+            </div>
+          </div>
+
+          {/* 3. Calculator */}
+          <div style={{ marginBottom: 16 }}>
+            <h4 style={{ fontSize: 13, fontWeight: 600, color: "#212121", marginBottom: 8 }}>Calculator</h4>
+            <div style={{ background: "#FFFFFF", border: "1px solid #E0E0E0", borderRadius: 8, padding: 10 }}>
+              {/* Display */}
+              <div style={{ background: "#F5F5F5", borderRadius: 4, padding: "8px 10px", marginBottom: 8, textAlign: "right" }}>
+                <span style={{ fontFamily: "Consolas, monospace", fontSize: 18, fontWeight: 700, color: "#212121" }}>
+                  {calculator.display}
+                </span>
+              </div>
+              {/* Buttons: 4 columns */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 2 }}>
+                {["7","8","9","÷","4","5","6","×","1","2","3","-","0",".","=","+","C"].map((btn) => {
+                  const isOperator = ["+","-","×","÷"].includes(btn);
+                  const isClear = btn === "C";
+                  const isEquals = btn === "=";
+                  let btnBg = "#FFFFFF";
+                  let btnColor = "#212121";
+                  let btnBorder = "1px solid #E0E0E0";
+                  if (isOperator) { btnColor = "#1565C0"; }
+                  if (isClear) { btnColor = "#D32F2F"; }
+                  if (isEquals) { btnBg = "#1565C0"; btnColor = "#FFFFFF"; btnBorder = "none"; }
+                  const gridCol = isClear ? "span 4" : undefined;
+                  return (
+                    <button
+                      key={btn}
+                      onClick={() => calculator.press(btn)}
+                      style={{
+                        gridColumn: gridCol,
+                        height: 30, margin: 2,
+                        background: btnBg, color: btnColor,
+                        border: btnBorder, borderRadius: 4,
+                        fontSize: 13, fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {btn}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* 4. Rules & Regulations */}
+          <div style={{ marginBottom: 16 }}>
+            <h4 style={{ fontSize: 13, fontWeight: 600, color: "#212121", marginBottom: 8 }}>Rules & Regulations</h4>
+            <div style={{ background: "#FFFFFF", border: "1px solid #E0E0E0", borderRadius: 8, padding: 12 }}>
+              <p style={{ fontSize: 11, color: "#757575", margin: "4px 0" }}>• Do not switch tabs or windows</p>
+              <p style={{ fontSize: 11, color: "#757575", margin: "4px 0" }}>• Do not use external resources</p>
+              <p style={{ fontSize: 11, color: "#757575", margin: "4px 0" }}>• Right-click is disabled</p>
+              <p style={{ fontSize: 11, color: "#757575", margin: "4px 0" }}>• Violations are monitored and reported</p>
+              <p style={{ fontSize: 11, color: "#757575", margin: "4px 0" }}>• Exam auto-submits when time expires</p>
+            </div>
+          </div>
+
+          {/* 5. Legend */}
+          <div style={{ marginBottom: 16 }}>
+            <h4 style={{ fontSize: 13, fontWeight: 600, color: "#212121", marginBottom: 8 }}>Legend</h4>
+            <div style={{ background: "#FFFFFF", border: "1px solid #E0E0E0", borderRadius: 8, padding: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                <div style={{ width: 14, height: 14, borderRadius: 4, background: "#1976D2" }} />
+                <span style={{ fontSize: 12, color: "#212121" }}>Current</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                <div style={{ width: 14, height: 14, borderRadius: 4, background: "#66BB6A" }} />
+                <span style={{ fontSize: 12, color: "#212121" }}>Answered</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                <div style={{ width: 14, height: 14, borderRadius: 4, background: "#EF5350" }} />
+                <span style={{ fontSize: 12, color: "#212121" }}>Not Answered</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ width: 14, height: 14, borderRadius: 4, background: "#FFA726" }} />
+                <span style={{ fontSize: 12, color: "#212121" }}>Marked for Review</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Submit Exam button - docked at bottom */}
+        <div style={{ padding: 16, borderTop: "1px solid #E0E0E0" }}>
+          <button
+            onClick={() => setShowSubmitDialog(true)}
+            style={{
+              width: "100%", padding: "12px 16px",
+              background: "#E53935", color: "#FFFFFF",
+              border: "none", borderRadius: 6,
+              fontSize: 14, fontWeight: 600,
+              cursor: "pointer",
+            }}
+            onMouseEnter={(e) => { (e.target as HTMLElement).style.background = "#C62828"; }}
+            onMouseLeave={(e) => { (e.target as HTMLElement).style.background = "#E53935"; }}
+          >
+            ⚠ Submit Exam
+          </button>
         </div>
       </div>
+
+      {/* ═══ ROW 2: FOOTER (left column only) - White bg, border-top ═══ */}
+      <div style={{ gridColumn: "1 / 2", background: "#FFFFFF", borderTop: "1px solid #E0E0E0", padding: "10px 20px", display: "flex", alignItems: "center", justifyContent: "center", gap: 12 }}>
+        {/* Previous button - SecondaryButton style */}
+        {!isFirstQuestion && (
+          <button
+            onClick={handlePrev}
+            style={{
+              padding: "10px 18px",
+              background: "#FFFFFF", color: "#212121",
+              border: "1px solid #E0E0E0", borderRadius: 6,
+              fontSize: 13, fontWeight: 500,
+              cursor: "pointer",
+            }}
+            onMouseEnter={(e) => { (e.target as HTMLElement).style.background = "#F5F5F5"; }}
+            onMouseLeave={(e) => { (e.target as HTMLElement).style.background = "#FFFFFF"; }}
+          >
+            ← Previous
+          </button>
+        )}
+
+        {/* Clear Answer - SecondaryButton */}
+        <button
+          onClick={handleClearAnswer}
+          style={{
+            padding: "10px 18px",
+            background: "#FFFFFF", color: "#757575",
+            border: "1px solid #E0E0E0", borderRadius: 6,
+            fontSize: 13, fontWeight: 500,
+            cursor: "pointer",
+          }}
+          onMouseEnter={(e) => { (e.target as HTMLElement).style.background = "#F5F5F5"; }}
+          onMouseLeave={(e) => { (e.target as HTMLElement).style.background = "#FFFFFF"; }}
+        >
+          Clear
+        </button>
+
+        {/* Mark for Review - SecondaryButton, orange when active */}
+        <button
+          onClick={handleMarkForReview}
+          style={{
+            padding: "10px 18px",
+            background: currentQuestion && markedForReview.has(currentQuestion.id) ? "#FFF8E1" : "#FFFFFF",
+            color: currentQuestion && markedForReview.has(currentQuestion.id) ? "#F57C00" : "#212121",
+            border: currentQuestion && markedForReview.has(currentQuestion.id) ? "1px solid #F57C00" : "1px solid #E0E0E0",
+            borderRadius: 6,
+            fontSize: 13, fontWeight: 500,
+            cursor: "pointer",
+          }}
+        >
+          {currentQuestion && markedForReview.has(currentQuestion.id) ? "✓ Marked" : "⚑ Mark for Review"}
+        </button>
+
+        {/* Next button - PrimaryButton style */}
+        {!isLastQuestion && (
+          <button
+            onClick={handleNext}
+            style={{
+              padding: "10px 18px",
+              background: "#1565C0", color: "#FFFFFF",
+              border: "none", borderRadius: 6,
+              fontSize: 13, fontWeight: 500,
+              cursor: "pointer",
+            }}
+            onMouseEnter={(e) => { (e.target as HTMLElement).style.background = "#0D47A1"; }}
+            onMouseLeave={(e) => { (e.target as HTMLElement).style.background = "#1565C0"; }}
+          >
+            Next →
+          </button>
+        )}
+      </div>
+
+      {/* ═══ SUBMIT DIALOG ═══ */}
+      {showSubmitDialog && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.4)" }}>
+          <div style={{ width: 500, background: "#FFFFFF", borderRadius: 8, border: "1px solid #E0E0E0", padding: 0 }}>
+            <div style={{ padding: 40 }}>
+              {/* Title */}
+              <h2 style={{ fontSize: 24, fontWeight: 700, color: "#212121", textAlign: "center", marginBottom: 30 }}>
+                Submit Exam
+              </h2>
+
+              {/* Summary Card */}
+              <div style={{ background: "#F5F5F5", borderRadius: 8, padding: 24, marginBottom: 30 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginBottom: 12 }}>
+                  <span style={{ color: "#212121" }}>Total Questions</span>
+                  <span style={{ fontWeight: 600, color: "#212121" }}>{totalQuestions}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginBottom: 12 }}>
+                  <span style={{ color: "#66BB6A" }}>Answered</span>
+                  <span style={{ fontWeight: 600, color: "#66BB6A" }}>{answeredCount}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginBottom: 12 }}>
+                  <span style={{ color: "#EF5350" }}>Not Answered</span>
+                  <span style={{ fontWeight: 600, color: "#EF5350" }}>{unansweredCount}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
+                  <span style={{ color: "#FFA726" }}>Marked for Review</span>
+                  <span style={{ fontWeight: 600, color: "#FFA726" }}>{markedCount}</span>
+                </div>
+              </div>
+
+              {/* Warning */}
+              <p style={{ fontSize: 13, color: "#E53935", textAlign: "center", marginBottom: 20 }}>
+                Are you sure you want to submit? This action cannot be undone.
+              </p>
+
+              {/* Buttons */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 20px 1fr", marginTop: 10 }}>
+                <button
+                  onClick={() => setShowSubmitDialog(false)}
+                  disabled={submitting}
+                  style={{ height: 44, fontSize: 15, background: "#FFFFFF", color: "#212121", border: "1px solid #E0E0E0", borderRadius: 6, cursor: "pointer" }}
+                >
+                  Go Back
+                </button>
+                <div />
+                <button
+                  onClick={handleSubmit}
+                  disabled={submitting}
+                  style={{ height: 44, fontSize: 15, fontWeight: 600, background: "#E53935", color: "#FFFFFF", border: "none", borderRadius: 6, cursor: "pointer", opacity: submitting ? 0.7 : 1 }}
+                >
+                  {submitting ? "Submitting..." : "Confirm Submit"}
+                </button>
+              </div>
+
+              {/* Loading bar */}
+              {submitting && (
+                <div style={{ height: 3, marginTop: 15, background: "#E3F2FD", borderRadius: 2, overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: "40%", background: "#1565C0", animation: "loadingSlide 1.5s infinite" }} />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
