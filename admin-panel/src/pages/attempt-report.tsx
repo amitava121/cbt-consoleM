@@ -50,6 +50,7 @@ function getSelectedOptionIds(answerData: unknown): string[] {
     const obj = answerData as Record<string, unknown>;
     if (Array.isArray(obj.selectedOptionIds)) return obj.selectedOptionIds.map(String);
     if (Array.isArray(obj.selected)) return obj.selected.map(String);
+    if (typeof obj.selectedOptionId === "string") return [obj.selectedOptionId];
     if (typeof obj.optionId === "string") return [obj.optionId];
   }
   if (typeof answerData === "string") return [answerData];
@@ -64,7 +65,6 @@ export default function AttemptReportPage() {
 
   useEffect(() => {
     if (!attemptId) return;
-
     const loadData = async () => {
       setLoading(true);
       try {
@@ -78,7 +78,6 @@ export default function AttemptReportPage() {
         setLoading(false);
       }
     };
-
     loadData();
   }, [attemptId]);
 
@@ -93,7 +92,7 @@ export default function AttemptReportPage() {
   if (!data) {
     return (
       <div className="text-center py-20 text-muted-foreground">
-        No data found for this attempt. Ensure it has been graded first.
+        No data found for this attempt.
       </div>
     );
   }
@@ -108,7 +107,7 @@ export default function AttemptReportPage() {
     sectionMap.set(q.examSectionId, list);
   }
 
-  // Calculate stats
+  // Stats
   let correct = 0;
   let incorrect = 0;
   let unattempted = 0;
@@ -173,20 +172,13 @@ export default function AttemptReportPage() {
                   const selectedIds = getSelectedOptionIds(answer?.answerData);
                   const wasAnswered = answer?.status === "answered" || answer?.status === "answered_and_marked";
                   const questionText = (q.content as { text?: string })?.text ?? "No content";
-                  const correctOptionIds = q.options.filter((o) => o.isCorrect).map((o) => o.id);
-
-                  // Determine if the overall answer is correct
-                  const isQuestionCorrect = wasAnswered &&
-                    selectedIds.length === correctOptionIds.length &&
-                    selectedIds.every((id) => correctOptionIds.includes(id));
+                  const correctOptions = q.options.filter((o) => o.isCorrect);
 
                   return (
                     <Card key={q.questionId} className="!py-4">
                       <CardHeader className="!pb-2">
                         <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                          <span className={`flex items-center justify-center h-6 w-6 rounded-full text-xs font-bold text-white ${
-                            !wasAnswered ? "bg-gray-400" : isQuestionCorrect ? "bg-green-500" : "bg-red-500"
-                          }`}>
+                          <span className="flex items-center justify-center h-6 w-6 rounded-full text-xs font-bold bg-muted text-foreground">
                             {qIdx + 1}
                           </span>
                           <span className="flex-1">{questionText}</span>
@@ -194,12 +186,6 @@ export default function AttemptReportPage() {
                             <Badge variant="secondary" className="text-[10px]">
                               Not Attempted
                             </Badge>
-                          )}
-                          {wasAnswered && isQuestionCorrect && (
-                            <CheckCircle2 className="h-4 w-4 text-green-500" />
-                          )}
-                          {wasAnswered && !isQuestionCorrect && (
-                            <XCircle className="h-4 w-4 text-red-500" />
                           )}
                         </CardTitle>
                       </CardHeader>
@@ -210,22 +196,15 @@ export default function AttemptReportPage() {
                               .sort((a, b) => a.displayOrder - b.displayOrder)
                               .map((opt) => {
                                 const isSelected = selectedIds.includes(opt.id);
-                                const isCorrect = opt.isCorrect;
 
-                                // Color logic:
-                                // - Green: correct answer (always shown)
-                                // - Red: selected but wrong
-                                // - Default: not selected, not correct
+                                // Only highlight the candidate's selected option
+                                // Green if selected & correct, Red if selected & wrong
                                 let bgClass = "bg-muted/30 border-border";
-                                let textClass = "";
 
-                                if (isCorrect) {
-                                  bgClass = "bg-green-50 border-green-400 dark:bg-green-950/40 dark:border-green-700";
-                                  textClass = "text-green-700 dark:text-green-300";
-                                }
-                                if (isSelected && !isCorrect) {
-                                  bgClass = "bg-red-50 border-red-400 dark:bg-red-950/40 dark:border-red-700";
-                                  textClass = "text-red-700 dark:text-red-300";
+                                if (isSelected && opt.isCorrect) {
+                                  bgClass = "bg-green-50 border-green-500 dark:bg-green-950/40 dark:border-green-600";
+                                } else if (isSelected && !opt.isCorrect) {
+                                  bgClass = "bg-red-50 border-red-500 dark:bg-red-950/40 dark:border-red-600";
                                 }
 
                                 return (
@@ -234,17 +213,17 @@ export default function AttemptReportPage() {
                                     className={`flex items-center gap-3 rounded-lg border px-4 py-2.5 text-sm ${bgClass}`}
                                   >
                                     <div className={`flex items-center justify-center h-5 w-5 rounded-full border text-[10px] font-bold shrink-0 ${
-                                      isCorrect ? "border-green-500 bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300" :
-                                      isSelected ? "border-red-500 bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300" :
+                                      isSelected && opt.isCorrect ? "border-green-500 bg-green-500 text-white" :
+                                      isSelected && !opt.isCorrect ? "border-red-500 bg-red-500 text-white" :
                                       "border-border"
                                     }`}>
                                       {String.fromCharCode(64 + opt.displayOrder)}
                                     </div>
-                                    <span className={`flex-1 ${textClass}`}>{opt.text}</span>
-                                    {isCorrect && (
+                                    <span className="flex-1">{opt.text}</span>
+                                    {isSelected && opt.isCorrect && (
                                       <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
                                     )}
-                                    {isSelected && !isCorrect && (
+                                    {isSelected && !opt.isCorrect && (
                                       <XCircle className="h-4 w-4 text-red-500 shrink-0" />
                                     )}
                                   </div>
@@ -252,33 +231,10 @@ export default function AttemptReportPage() {
                               })}
                           </div>
                         )}
-                        {/* Show correct answer text below options */}
-                        <div className="mt-3 pt-2 border-t border-border/50">
-                          <p className="text-xs font-medium text-green-600 dark:text-green-400">
-                            ✓ Correct Answer: Option{" "}
-                            {correctOptionIds
-                              .map((id) => {
-                                const opt = q.options.find((o) => o.id === id);
-                                return opt ? String.fromCharCode(64 + opt.displayOrder) : "?";
-                              })
-                              .join(", ")}
-                            {" — "}
-                            {correctOptionIds
-                              .map((id) => q.options.find((o) => o.id === id)?.text ?? "")
-                              .join(", ")}
-                          </p>
-                          {wasAnswered && !isQuestionCorrect && (
-                            <p className="text-xs text-red-600 dark:text-red-400 mt-1">
-                              ✗ Candidate's Answer: Option{" "}
-                              {selectedIds
-                                .map((id) => {
-                                  const opt = q.options.find((o) => o.id === id);
-                                  return opt ? String.fromCharCode(64 + opt.displayOrder) : "?";
-                                })
-                                .join(", ")}
-                            </p>
-                          )}
-                        </div>
+                        {/* Show correct answer below */}
+                        <p className="mt-3 text-sm font-medium text-green-700 dark:text-green-400">
+                          Ans : {correctOptions.map((o) => `${String.fromCharCode(64 + o.displayOrder)}) ${o.text}`).join(", ")}
+                        </p>
                       </CardContent>
                     </Card>
                   );

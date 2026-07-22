@@ -16,7 +16,6 @@ import {
   Settings,
   ShieldAlert,
 
-  Trophy,
   Users,
   X,
 } from "lucide-react";
@@ -47,7 +46,6 @@ const navItems = [
   { to: "/institutions", label: "Institutions", icon: Building2, end: false },
   { to: "/devices", label: "Devices", icon: Monitor, end: false },
   { to: "/live-monitor", label: "Live Monitor", icon: Activity, end: false },
-  { to: "/results", label: "Results & Grading", icon: Trophy, end: false },
   { to: "/violations", label: "Violations", icon: ShieldAlert, end: false },
   { to: "/analytics", label: "Analytics", icon: BarChart3, end: false },
   { to: "/audit-logs", label: "Audit Logs", icon: ScrollText, end: false },

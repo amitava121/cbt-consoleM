@@ -73,6 +73,7 @@ const examBatchRoutes: FastifyPluginAsync = async (app) => {
         search?: string;
         examId?: string;
         status?: string;
+        institutionId?: string;
       };
       const page = Math.max(1, parseInt(query.page ?? "1"));
       const pageSize = Math.min(
@@ -87,6 +88,8 @@ const examBatchRoutes: FastifyPluginAsync = async (app) => {
       if (query.examId) conditions.push(eq(examBatches.examId, query.examId));
       if (query.status)
         conditions.push(eq(examBatches.status, query.status as never));
+      if (query.institutionId)
+        conditions.push(eq(batches.institutionId, query.institutionId));
 
       const where = conditions.length > 0 ? and(...conditions) : undefined;
       const offset = (page - 1) * pageSize;
@@ -122,6 +125,7 @@ const examBatchRoutes: FastifyPluginAsync = async (app) => {
         db
           .select({ count: sql<number>`COUNT(*)::int` })
           .from(examBatches)
+          .leftJoin(batches, eq(examBatches.batchId, batches.id))
           .where(where),
       ]);
 

@@ -4,6 +4,7 @@ import {
   BookOpen,
   ClipboardList,
   Loader2,
+  Trophy,
   Users,
   UsersRound,
 } from "lucide-react";
@@ -18,11 +19,12 @@ import BatchesPage from "./batches";
 import CandidatesPage from "./candidates";
 import ExamsListPage from "./exams-list";
 import QuestionsPage from "./questions";
+import ResultsPage from "./results";
 import SubjectsPage from "./subjects";
 
 import { FolderCard } from "../components/ui/folder-card";
 
-type Folder = "batches" | "subjects" | "candidates" | "exams";
+type Folder = "batches" | "subjects" | "candidates" | "exams" | "results";
 
 export default function InstitutionDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -53,7 +55,7 @@ export default function InstitutionDetailPage() {
     key: Folder;
     label: string;
     icon: typeof Users;
-    variant: "blue" | "emerald" | "amber" | "purple";
+    variant: "blue" | "emerald" | "amber" | "purple" | "rose" | "indigo";
     description: string;
   }[] = [
     {
@@ -83,6 +85,13 @@ export default function InstitutionDetailPage() {
       icon: Users,
       variant: "purple",
       description: "Registered student list",
+    },
+    {
+      key: "results",
+      label: "Results",
+      icon: Trophy,
+      variant: "rose",
+      description: "Exam results & answer sheets",
     },
   ];
 
@@ -181,20 +190,22 @@ export default function InstitutionDetailPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div>
+      {/* Sticky Back button bar */}
+      <div className="sticky top-0 z-10 -mx-6 md:-mx-8 -mt-6 md:-mt-8 px-4 md:px-6 py-1 mb-4 bg-muted/50">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleBack}
+        >
+          <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
+          {!activeFolder ? "Back to Institutions" : "Back"}
+        </Button>
+      </div>
+
       {/* Folder cards view */}
       {!activeFolder && (
         <div className="space-y-6">
-          <div className="flex items-center gap-3">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleBack}
-            >
-              <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
-              Back to Institutions
-            </Button>
-          </div>
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4 pt-2">
             {folders.map((folder) => (
               <FolderCard
@@ -244,6 +255,9 @@ export default function InstitutionDetailPage() {
       )}
       {activeFolder === "candidates" && (
         <CandidatesPage institutionId={id} hideHeader onBack={handleBack} />
+      )}
+      {activeFolder === "results" && (
+        <ResultsPage institutionId={id} />
       )}
       {activeFolder === "batches" &&
         selectedBatch &&

@@ -1,16 +1,18 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { type FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { db } from "../../database/db.js";
 import {
     answers,
     attempts,
+    candidates,
     examBatches,
     examQuestions,
     examSections,
     exams,
     questionOptions,
     questions,
+    users,
 } from "../../database/schemas/index.js";
 import { requireRole } from "../../middleware/rbac.js";
 import {
@@ -272,6 +274,167 @@ const resultsRoutes: FastifyPluginAsync = async (app) => {
 
     return reply.send({ success: true, message: "Results published" });
   });
+
+  /**
+   * GET /results/batch/:examBatchId/answer-sheets
+   * Returns all submitted attempts for a batch with candidate info and answer counts.
+   * No grading required — just raw answer data.
+   */
+  app.get("/batch/:examBatchId/answer-sheets", async (request, reply) => {
+    const { examBatchId } = request.params as { examBatchId: string };
+
+    if (!z.string().uuid().safeParse(examBatchId).success) {
+      return reply.code(400).send({ error: "Invalid exam batch ID" });
+    }
+
+    // Get all submitted attempts with candidate info
+    const attemptRows = await db
+      .select({
+        attemptId: attempts.id,
+        candidateId: attempts.candidateId,
+        status: attempts.status,
+        submittedAt: attempts.submittedAt,
+        candidateName: users.fullName,
+        admitCardNumber: candidates.admitCardNumber,
+      })
+      .from(attempts)
+      .innerJoin(candidates, eq(candidates.id, attempts.candidateId))
+      .innerJoin(users, eq(users.id, candidates.userId))
+      .where(
+        and(
+          eq(attempts.examBatchId, examBatchId),
+          inArray(attempts.status, [
+            "submitted",
+            "auto_submitted",
+            "force_submitted",
+            "terminated",
+          ]),
+        ),
+      );
+
+    if (attemptRows.length === 0) {
+      return reply.send({ data: [] });
+    }
+
+    // Get total questions for this exam batch
+    const [batchInfo] = await db
+      .select({ examId: examBatches.examId })
+      .from(examBatches)
+      .where(eq(examBatches.id, examBatchId))
+      .limit(1);
+
+    let totalQuestions = 0;
+    if (batchInfo) {
+      const sectionIds = await db
+        .select({ id: examSections.id })
+        .from(examSections)
+        .where(eq(examSections.examId, batchInfo.examId));
+
+      if (sectionIds.length > 0) {
+        const [countResult] = await db
+          .select({ count: sql<number>`COUNT(*)::int` })
+          .from(examQuestions)
+          .where(inArray(examQuestions.examSectionId, sectionIds.map((s) => s.id)));
+        totalQuestions = countResult?.count ?? 0;
+      }
+    }
+
+    // Get answer counts per attempt (answered + correct count)
+    const attemptIds = attemptRows.map((a) => a.attemptId);
+
+    // Get answered counts
+    const answeredCounts = await db
+      .select({
+        attemptId: answers.attemptId,
+        answeredCount: sql<number>`COUNT(*) FILTER (WHERE ${answers.status} IN ('answered', 'answered_and_marked'))::int`,
+      })
+      .from(answers)
+      .where(inArray(answers.attemptId, attemptIds))
+      .groupBy(answers.attemptId);
+
+    const answeredMap = new Map(answeredCounts.map((r) => [r.attemptId, r.answeredCount]));
+
+    // For correct count, we need to compare answers with correct options
+    // Get all answers for these attempts
+    const allAnswers = await db
+      .select({
+        attemptId: answers.attemptId,
+        questionId: answers.questionId,
+        answerDataJson: answers.answerDataJson,
+        status: answers.status,
+      })
+      .from(answers)
+      .where(
+        and(
+          inArray(answers.attemptId, attemptIds),
+          inArray(answers.status, ["answered", "answered_and_marked"]),
+        ),
+      );
+
+    // Get correct options for all questions in this exam
+    const questionIds = [...new Set(allAnswers.map((a) => a.questionId))];
+    const correctOptionsMap = new Map<string, string[]>();
+
+    if (questionIds.length > 0) {
+      const correctOpts = await db
+        .select({
+          questionId: questionOptions.questionId,
+          optionId: questionOptions.id,
+        })
+        .from(questionOptions)
+        .where(
+          and(
+            inArray(questionOptions.questionId, questionIds),
+            eq(questionOptions.isCorrect, true),
+          ),
+        );
+
+      for (const opt of correctOpts) {
+        const list = correctOptionsMap.get(opt.questionId) ?? [];
+        list.push(opt.optionId);
+        correctOptionsMap.set(opt.questionId, list);
+      }
+    }
+
+    // Calculate correct count per attempt
+    const correctCountMap = new Map<string, number>();
+    for (const ans of allAnswers) {
+      const correctIds = correctOptionsMap.get(ans.questionId) ?? [];
+      const selectedIds = getSelectedIds(ans.answerDataJson);
+
+      if (
+        selectedIds.length === correctIds.length &&
+        selectedIds.every((id) => correctIds.includes(id))
+      ) {
+        correctCountMap.set(ans.attemptId, (correctCountMap.get(ans.attemptId) ?? 0) + 1);
+      }
+    }
+
+    const data = attemptRows.map((a) => ({
+      attemptId: a.attemptId,
+      candidateName: a.candidateName,
+      admitCardNumber: a.admitCardNumber ?? "—",
+      totalQuestions,
+      answeredCount: answeredMap.get(a.attemptId) ?? 0,
+      correctCount: correctCountMap.get(a.attemptId) ?? 0,
+    }));
+
+    return reply.send({ data });
+  });
 };
+
+function getSelectedIds(answerData: unknown): string[] {
+  if (!answerData) return [];
+  if (Array.isArray(answerData)) return answerData.map(String);
+  if (typeof answerData === "object" && answerData !== null) {
+    const obj = answerData as Record<string, unknown>;
+    if (Array.isArray(obj.selectedOptionIds)) return obj.selectedOptionIds.map(String);
+    if (Array.isArray(obj.selected)) return obj.selected.map(String);
+    if (typeof obj.selectedOptionId === "string") return [obj.selectedOptionId];
+    if (typeof obj.optionId === "string") return [obj.optionId];
+  }
+  if (typeof answerData === "string") return [answerData];
+  return [];
+}
 
 export default resultsRoutes;
