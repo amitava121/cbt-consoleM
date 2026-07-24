@@ -4,6 +4,7 @@ import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vite";
 
 export default defineConfig({
+  base: "/examportal/",
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
@@ -15,11 +16,11 @@ export default defineConfig({
     host: true,
     proxy: {
       "/api": {
-        target: "http://localhost:3000",
+        target: "http://127.0.0.1:3000",
         changeOrigin: true,
       },
       "/ws": {
-        target: "ws://localhost:3000",
+        target: "ws://127.0.0.1:3000",
         ws: true,
       },
     },
