@@ -2,6 +2,7 @@ import {
   candidateService,
   generateDeviceFingerprint,
 } from "@/services/candidate";
+import { browserSessionService } from "@/services/browser-session";
 import { Loader2 } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -28,6 +29,12 @@ export default function CandidateLogin() {
       localStorage.setItem("candidateAccessToken", tokenData.accessToken);
       localStorage.setItem("candidateRefreshToken", tokenData.refreshToken);
       toast.success(`Welcome, ${tokenData.user?.fullName ?? "Candidate"}`);
+      // Register browser session for monitoring
+      browserSessionService.register(
+        tokenData.user?.id,
+        tokenData.user?.fullName ?? "Candidate",
+        admitCardNumber
+      );
       navigate("/exams");
     } catch (err: any) {
       const errData = err.response?.data?.error;

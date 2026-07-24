@@ -1,6 +1,8 @@
 import { candidateService, type CandidateExam } from "@/services/candidate";
+import { browserSessionService } from "@/services/browser-session";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
+import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
 export default function CandidateExamList() {
@@ -10,7 +12,19 @@ export default function CandidateExamList() {
     queryFn: candidateService.getExams,
   });
 
+  // Start browser session heartbeat on dashboard
+  useEffect(() => {
+    browserSessionService.startHeartbeat(() => ({
+      currentPage: "dashboard",
+      currentStatus: "online",
+    }));
+    return () => {
+      browserSessionService.stopHeartbeat();
+    };
+  }, []);
+
   const handleLogout = () => {
+    browserSessionService.disconnect();
     localStorage.removeItem("candidateAccessToken");
     localStorage.removeItem("candidateRefreshToken");
     navigate("/login");

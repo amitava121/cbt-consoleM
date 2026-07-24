@@ -1,4 +1,5 @@
 import { candidateService, type CandidateQuestion } from "@/services/candidate";
+import { browserSessionService } from "@/services/browser-session";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -313,6 +314,23 @@ export default function CandidateExamPage() {
     const timer = setTimeout(() => navigate("/login"), 2000);
     return () => clearTimeout(timer);
   }, [forceLogout, navigate, storageKey]);
+
+  // Browser session heartbeat for admin monitoring
+  useEffect(() => {
+    if (!examStarted || !attemptId || !batchId) return;
+    browserSessionService.startHeartbeat(() => ({
+      currentPage: "exam",
+      currentQuestionIndex: currentIndex,
+      remainingTimeSecs: remainingSecs,
+      examBatchId: batchId,
+      examName: examMeta?.examName,
+      attemptId: attemptId ?? undefined,
+      currentStatus: serverPaused ? "paused" : "taking_exam",
+    }));
+    return () => {
+      browserSessionService.stopHeartbeat();
+    };
+  }, [examStarted, attemptId, batchId]);
 
   // Section management
   const sections = useMemo(() => {

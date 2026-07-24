@@ -15,6 +15,7 @@ import candidateExamRoutes from "./modules/candidate/candidate-exam-routes.js";
 import dashboardRoutes from "./modules/dashboard/dashboard-routes.js";
 import examBatchRoutes from "./modules/exams/exam-batch-routes.js";
 import examRoutes from "./modules/exams/exam-routes.js";
+import browserSessionRoutes from "./modules/monitoring/browser-session-routes.js";
 import monitoringRoutes from "./modules/monitoring/monitoring-routes.js";
 import candidateRoutes from "./modules/organization/candidate-routes.js";
 import devicePublicRoutes from "./modules/organization/device-public-routes.js";
@@ -227,6 +228,9 @@ await app.register(
         prefix: "/candidate/exams",
       });
       await protectedScope.register(sebRoutes, { prefix: "/seb" });
+      await protectedScope.register(browserSessionRoutes, {
+        prefix: "/browser-sessions",
+      });
     });
   },
   { prefix: "/api/v1" },
@@ -290,6 +294,9 @@ await app.register(async (protectedScope) => {
     prefix: "/api/candidate/exams",
   });
   await protectedScope.register(sebRoutes, { prefix: "/api/seb" });
+  await protectedScope.register(browserSessionRoutes, {
+    prefix: "/api/browser-sessions",
+  });
 });
 
 await app.register(websocketPlugin);

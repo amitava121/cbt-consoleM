@@ -36,6 +36,13 @@
       "when": 1784586263113,
       "tag": "0004_many_golden_guardian",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1784723005956,
+      "tag": "0005_wandering_the_stranger",
+      "breakpoints": true
     }
   ]
 }
